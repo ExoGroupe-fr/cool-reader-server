@@ -17,7 +17,7 @@ jobs:
     container: swift:6.2-noble
     steps:
       - uses: actions/checkout@v4
-      - run: apt-get update && apt-get install -y --no-install-recommends libsqlite3-dev
+      - run: apt-get update && apt-get install -y --no-install-recommends libsqlite3-dev libturbojpeg0-dev libpng-dev libwebp-dev poppler-utils
       - run: swift test
 
   docker:

@@ -142,6 +142,16 @@ swift test
 Swift 6.2 or later; SwiftNIO, swift-nio-ssl, swift-crypto and swift-certificates (Apple); SQLite. `Sources/CoolReaderKit/Core` holds the books, formats, names
 and catalogues and only uses Foundation; `Sources/CoolReaderKit/Server` holds the server.
 
+On Linux, libjpeg-turbo, libpng and libwebp shrink covers and pages, and Poppler draws PDF covers and pages; on
+Ubuntu or Debian:
+
+```bash
+apt install libsqlite3-dev libturbojpeg0-dev libpng-dev libwebp-dev poppler-utils
+```
+
+On a Mac, `COOLREADER_SYSTEM_IMAGE_LIBS=1 swift test` builds and tests that Linux code too, with Homebrew's
+`jpeg-turbo`, `libpng`, `webp` and `poppler`.
+
 ## En français
 
 Cool Reader Server est un petit serveur maison façon Plex pour les mangas, BD, comics et livres : on lui indique

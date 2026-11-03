@@ -19,6 +19,8 @@ nonisolated final class Images: Sendable {
     private let cache: URL
     private let archives = ArchivePool(capacity: 8)
     static let coverSize = 600.0
+    /// The longest side of a PDF page drawn when the reader asks for no width.
+    static let pdfPageSize = 1600.0
 
     init(cacheDirectory: URL) {
         cache = cacheDirectory
@@ -51,10 +53,18 @@ nonisolated final class Images: Sendable {
         return nil
     }
 
-    /// One page of an image book, at most `maxWidth` pixels wide where the platform can resize.
+    /// One page of an image book, at most `maxWidth` pixels wide where the platform can resize. PDF pages are drawn,
+    /// 1600 pixels on their longest side when no width is asked for.
     func page(_ book: BookRecord, index: Int, maxWidth: Double?, root: URL) throws -> ImageData {
-        guard book.pagePaths.indices.contains(index) else { throw HTTPError.notFound }
         let url = root.appendingPathComponent(book.path)
+        if book.format == .pdf {
+            guard (0..<(book.pageCount ?? 0)).contains(index),
+                  let data = PDFPages.render(url: url, page: index, maxPixelSize: maxWidth ?? Self.pdfPageSize) else {
+                throw HTTPError.notFound
+            }
+            return ImageData(data: data, contentType: "image/jpeg")
+        }
+        guard book.pagePaths.indices.contains(index) else { throw HTTPError.notFound }
         let archive = try archives.archive(for: url, format: book.format)
         let path = book.pagePaths[index]
         let data = try archive.data(atPath: path)
@@ -147,7 +157,8 @@ nonisolated final class ArchivePool: @unchecked Sendable {
     }
 }
 
-/// Shrinks images to JPEG with ImageIO, on the Mac. Elsewhere images go out as they are, for now.
+/// Shrinks images to JPEG: with ImageIO on the Mac, with libjpeg-turbo, libpng and libwebp on Linux. Formats those
+/// libraries don't read (GIF, AVIF, HEIC…) go out as they are.
 nonisolated enum Thumbnailer {
     static func jpeg(_ data: Data, maxPixelSize: Double) -> Data? {
         #if canImport(CoreGraphics) && canImport(ImageIO)
@@ -163,6 +174,8 @@ nonisolated enum Thumbnailer {
         CGImageDestinationAddImage(destination, image, [kCGImageDestinationLossyCompressionQuality: 0.82] as CFDictionary)
         guard CGImageDestinationFinalize(destination) else { return nil }
         return output as Data
+        #elseif canImport(CTurboJPEG) && canImport(CPNG) && canImport(CWebP)
+        ImageCodecs.thumbnail(data, maxPixelSize: maxPixelSize)
         #else
         nil
         #endif
