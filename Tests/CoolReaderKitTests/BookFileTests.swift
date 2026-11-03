@@ -5,7 +5,7 @@ import Testing
 /// Raw DEFLATE streams and a ZIP archive made by zlib (Python's), read back by `Inflate` and `ZipArchive`.
 struct InflateTests {
     nonisolated static let text = Data(String(repeating: "Cool Reader Server reads ZIP. ", count: 400).utf8)
-    nonisolated static let pattern = Data((0..<5000).map { UInt8(($0 * 7 + $0 / 13) & 0xFF) })
+    nonisolated static let pattern = Data((0..<5000).map { (i: Int) -> UInt8 in UInt8(truncatingIfNeeded: i * 7 + i / 13) })
     /// 1 200 bytes of noise, from the same generator as the fixture's.
     nonisolated static let noise: Data = {
         var x = 12345

@@ -8,7 +8,7 @@ struct RarArchiveTests {
     /// What every fixture holds.
     nonisolated static let expected: [String: Data] = [
         "001.txt": Data(String(repeating: "Cool Reader reads RAR. ", count: 300).utf8),
-        "002.bin": Data((0..<4096).map { UInt8(($0 * 7 + $0 / 13) & 0xFF) }),
+        "002.bin": Data((0..<4096).map { (i: Int) -> UInt8 in UInt8(truncatingIfNeeded: i * 7 + i / 13) }),
         "sub/003.txt": Data(String(repeating: "The end.\n", count: 50).utf8),
         "sub/empty.txt": Data(),
     ]

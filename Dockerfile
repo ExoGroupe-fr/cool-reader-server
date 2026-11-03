@@ -5,6 +5,7 @@ WORKDIR /build
 COPY Package.swift Package.resolved ./
 RUN swift package resolve
 COPY Sources Sources
+COPY Tests Tests
 RUN swift build -c release --product cool-reader-server \
     && cp "$(swift build -c release --show-bin-path)/cool-reader-server" /usr/local/bin/
 
