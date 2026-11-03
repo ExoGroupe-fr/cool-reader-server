@@ -34,7 +34,7 @@ nonisolated enum InvitationRoutes {
         router.add(.GET, "/server") { request in
             let caller = try await AdminRoutes.adminPage(request, context)
             let strings = Strings(request.language)
-            var page = WebPage(title: strings["server"], strings: strings, caller: caller)
+            var page = WebPage(title: strings["server"], strings: strings, caller: caller, libraries: context.store.visibleLibraries(for: caller.user), section: "/server")
             page.add("<h1>\(h(strings["server"]))</h1>")
             if request.query["saved"] != nil { page.add("<p class=\"ok\">\(h(strings["saved"]))</p>") }
             page.add("""
@@ -124,7 +124,7 @@ nonisolated enum InvitationRoutes {
         let isOwn = user.id == caller.user.id
         let hasPassword = context.store.credentials(name: user.name)?.1.isEmpty == false
         let message = strings.invitationMessage(server: context.serverName, appStore: appStoreLink, link: invitation.link)
-        var page = WebPage(title: strings["invitation"], strings: strings, caller: caller)
+        var page = WebPage(title: strings["invitation"], strings: strings, caller: caller, libraries: context.store.visibleLibraries(for: caller.user), section: "/members")
         page.add("<h1>\(h(strings.invitationTitle(isOwn ? nil : user.name)))</h1>")
         page.add("<p class=\"hint\">\(h(strings.invitationValidity(invitation.expiresAt)))</p>")
         let code = (try? QRCode(invitation.link).svg(moduleSize: 6, title: strings["invitation"])) ?? ""

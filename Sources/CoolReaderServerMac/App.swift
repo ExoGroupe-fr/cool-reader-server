@@ -42,8 +42,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationWillFinishLaunching(_ notification: Notification) {
         LogFile.start()
-        // LSUIElement does this in the app; this covers `swift run`.
-        NSApp.setActivationPolicy(.accessory)
+        // LSUIElement keeps the app out of the Dock while it starts; it comes in now unless the user turned it off.
+        DockIcon.apply()
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -61,6 +61,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 LogFile.rotateIfNeeded()
             }
         }
+    }
+
+    /// The Dock icon opens the site, as Plex Media Server opens Plex.
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        if controller.state == .running { controller.open(controller.adminURL) }
+        return false
+    }
+
+    func applicationDockMenu(_ sender: NSApplication) -> NSMenu? {
+        let menu = NSMenu()
+        menu.addItem(withTitle: Strings["openInBrowser"], action: #selector(openSite), keyEquivalent: "").target = self
+        menu.addItem(withTitle: Strings["addFolder"], action: #selector(addFolder), keyEquivalent: "").target = self
+        return menu
+    }
+
+    @objc private func openSite() {
+        controller.open(controller.adminURL)
+    }
+
+    @objc private func addFolder() {
+        Task { await controller.chooseFolder() }
     }
 
     /// Folders dropped on the app's icon, or opened with it, become libraries.

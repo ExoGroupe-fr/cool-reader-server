@@ -44,6 +44,7 @@ struct PanelView: View {
                 }
                 .disabled(controller.state != .running)
                 LoginItemRow(controller: controller)
+                DockRow(controller: controller)
                 Button { leave { controller.open(controller.logFile) } } label: {
                     RowLabel(Strings["showLog"], systemImage: "doc.text")
                 }
@@ -266,6 +267,26 @@ private struct LoginItemRow: View {
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(.leading, 26)
             }
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
+    }
+}
+
+/// In the Dock too, or in the menu bar only.
+private struct DockRow: View {
+    @Bindable var controller: ServerController
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "dock.rectangle")
+                .frame(width: 18, height: 16)
+            Text(Strings["showInDock"])
+            Spacer(minLength: 8)
+            Toggle(Strings["showInDock"], isOn: $controller.showsInDock)
+                .labelsHidden()
+                .toggleStyle(.switch)
+                .controlSize(.mini)
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 4)
