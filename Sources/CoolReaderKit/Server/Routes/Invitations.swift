@@ -122,6 +122,7 @@ nonisolated enum InvitationRoutes {
         let invitation = try context.invite(user, lifetime: lifetime, addresses: addresses)
         Log.info("Invitation made for \(user.name), valid until \(invitation.expiresAt).")
         let isOwn = user.id == caller.user.id
+        let hasPassword = context.store.credentials(name: user.name)?.1.isEmpty == false
         let message = strings.invitationMessage(server: context.serverName, appStore: appStoreLink, link: invitation.link)
         var page = WebPage(title: strings["invitation"], strings: strings, caller: caller)
         page.add("<h1>\(h(strings.invitationTitle(isOwn ? nil : user.name)))</h1>")
@@ -131,6 +132,7 @@ nonisolated enum InvitationRoutes {
             <div class="invite"><div class="qr">\(code)</div>
             <ol class="steps"><li>\(h(strings["inviteStep1"])) <a href="\(appStoreLink)">App Store</a></li>
             <li>\(h(strings["inviteStep2"]))</li><li>\(h(strings["inviteStep3"]))</li></ol></div>
+            \(hasPassword ? "<p class=\"hint\">\(h(strings[isOwn ? "inviteOwnPassword" : "inviteWithPassword"]))</p>" : "")
             <label>\(h(strings["link"]))<input id="invitation-link" readonly value="\(h(invitation.link))"></label>
             <p class="inline"><button type="button" data-copy="invitation-link">\(h(strings["copyLink"]))</button>
             <button type="button" class="quiet" data-share="\(h(message))">\(h(strings["share"]))</button>
