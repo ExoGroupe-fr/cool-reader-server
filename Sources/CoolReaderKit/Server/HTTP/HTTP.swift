@@ -265,6 +265,8 @@ nonisolated enum HTTPServer {
             .bind(host: host, port: port) { channel in
                 channel.eventLoop.makeCompletedFuture {
                     let info = ConnectionInfo()
+                    try channel.pipeline.syncOperations.addHandler(IdleStateHandler(allTimeout: .seconds(120)))
+                    try channel.pipeline.syncOperations.addHandler(CloseWhenIdle())
                     if let tls { try channel.pipeline.syncOperations.addHandler(ProtocolSniffer(sslContext: tls, connection: info)) }
                     try channel.pipeline.syncOperations.configureHTTPServerPipeline()
                     let wrapped = try NIOAsyncChannel<HTTPServerRequestPart, HTTPServerResponsePart>(wrappingChannelSynchronously: channel)
@@ -277,6 +279,20 @@ nonisolated enum HTTPServer {
                 for try await connection in inbound {
                     group.addTask { await serve(connection, handler: handler) }
                 }
+            }
+        }
+    }
+
+    /// A connection that neither sends nor receives for two minutes is closed: a client holding many open but
+    /// silent connections can't starve the server. Downloads keep writing, so they last.
+    private final class CloseWhenIdle: ChannelInboundHandler {
+        typealias InboundIn = NIOAny
+
+        func userInboundEventTriggered(context: ChannelHandlerContext, event: Any) {
+            if event is IdleStateHandler.IdleStateEvent {
+                context.close(promise: nil)
+            } else {
+                context.fireUserInboundEventTriggered(event)
             }
         }
     }
