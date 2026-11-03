@@ -1,0 +1,18 @@
+# Cool Reader Server with Docker Compose: `docker compose up -d` in this folder, then open http://<server>:7272.
+services:
+  cool-reader-server:
+    image: ghcr.io/pookee/cool-reader-server:latest
+    container_name: cool-reader-server
+    # The host's network: Cool Reader finds the server by Bonjour, and remote access can open the router's port.
+    # With Docker's own network instead, publish the port ("7272:7272") and set COOLREADER_ADDRESSES to the
+    # host's address, e.g. "192.168.1.10:7272", so invitations carry it.
+    network_mode: host
+    volumes:
+      - ./config:/config                         # database, cache, certificate, setup code
+      - /volume1/Mangas:/libraries/Mangas:ro     # your folders, read only
+      - /volume1/BD:/libraries/BD:ro
+    environment:
+      COOLREADER_METADATA_LANGUAGE: fr           # language of synopses and editions
+      COOLREADER_METADATA_COUNTRY: fr            # Apple Books store
+      COOLREADER_NAME: Cool Reader Server        # the name Cool Reader shows
+    restart: unless-stopped

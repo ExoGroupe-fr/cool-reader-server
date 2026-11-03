@@ -1,0 +1,20 @@
+<?xml version="1.0"?>
+<Container version="2">
+  <Name>cool-reader-server</Name>
+  <Repository>ghcr.io/pookee/cool-reader-server:latest</Repository>
+  <Registry>https://github.com/pookee/cool-reader-server/pkgs/container/cool-reader-server</Registry>
+  <Network>host</Network>
+  <Privileged>false</Privileged>
+  <Support>https://github.com/pookee/cool-reader-server/issues</Support>
+  <Project>https://github.com/pookee/cool-reader-server</Project>
+  <Overview>A home server for comics, manga and ebooks, in the spirit of Plex. Point it at your folders: it recognises the series, finds posters and synopses, and the people you invite read the libraries you choose in Cool Reader (iPhone, iPad), any OPDS reader or a browser. Free and open source, no account, no relay.</Overview>
+  <Category>MediaServer:Books</Category>
+  <WebUI>http://[IP]:7272/</WebUI>
+  <Config Name="Config" Target="/config" Default="/mnt/user/appdata/cool-reader-server" Mode="rw" Description="Database, cache, certificate and the setup code of the first start." Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/cool-reader-server</Config>
+  <Config Name="Library 1" Target="/libraries/Mangas" Default="" Mode="ro" Description="A folder of books, read only. Add it in the web admin as /libraries/Mangas." Type="Path" Display="always" Required="false" Mask="false"></Config>
+  <Config Name="Library 2" Target="/libraries/BD" Default="" Mode="ro" Description="Another folder of books, read only." Type="Path" Display="always" Required="false" Mask="false"></Config>
+  <Config Name="Port" Target="COOLREADER_PORT" Default="7272" Mode="" Description="The port for HTTP and HTTPS (host network)." Type="Variable" Display="advanced" Required="false" Mask="false">7272</Config>
+  <Config Name="Metadata language" Target="COOLREADER_METADATA_LANGUAGE" Default="en" Mode="" Description="Language of synopses and editions: en, fr, de, es, it, ja…" Type="Variable" Display="always" Required="false" Mask="false">en</Config>
+  <Config Name="Metadata country" Target="COOLREADER_METADATA_COUNTRY" Default="us" Mode="" Description="Apple Books store country: us, fr, de…" Type="Variable" Display="always" Required="false" Mask="false">us</Config>
+  <Config Name="Server name" Target="COOLREADER_NAME" Default="Cool Reader Server" Mode="" Description="The name Cool Reader shows." Type="Variable" Display="advanced" Required="false" Mask="false">Cool Reader Server</Config>
+</Container>
