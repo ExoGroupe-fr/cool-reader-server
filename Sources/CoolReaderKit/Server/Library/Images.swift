@@ -168,7 +168,17 @@ nonisolated enum Thumbnailer {
             kCGImageSourceCreateThumbnailWithTransform: true,
             kCGImageSourceThumbnailMaxPixelSize: maxPixelSize,
         ]
-        guard let image = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else { return nil }
+        guard var image = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else { return nil }
+        if ![.none, .noneSkipFirst, .noneSkipLast].contains(image.alphaInfo),
+           let canvas = CGContext(data: nil, width: image.width, height: image.height, bitsPerComponent: 8, bytesPerRow: 0,
+                                  space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue) {
+            // JPEG has no transparency: lay it on white, as Linux does, rather than ImageIO's black.
+            let frame = CGRect(x: 0, y: 0, width: image.width, height: image.height)
+            canvas.setFillColor(CGColor(red: 1, green: 1, blue: 1, alpha: 1))
+            canvas.fill(frame)
+            canvas.draw(image, in: frame)
+            if let flattened = canvas.makeImage() { image = flattened }
+        }
         let output = NSMutableData()
         guard let destination = CGImageDestinationCreateWithData(output, "public.jpeg" as CFString, 1, nil) else { return nil }
         CGImageDestinationAddImage(destination, image, [kCGImageDestinationLossyCompressionQuality: 0.82] as CFDictionary)

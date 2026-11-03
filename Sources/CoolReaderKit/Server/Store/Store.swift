@@ -220,12 +220,15 @@ nonisolated final class Store: Sendable {
 
     // MARK: - Scans
 
-    /// The books known in a library, by path: what a scan compares the files with.
+    /// The books known in a library, by path: what a scan compares the files with. A PDF without a page count
+    /// was read where nothing could count its pages (Linux without poppler): it is read again.
     func knownBooks(libraryID: Int) -> [String: (size: Int64, modified: Double?, analysed: Bool)] {
-        let rows = (try? database.query("SELECT path, file_size, modified_at, analysed FROM books WHERE library_id = ?", [libraryID])) ?? []
+        let rows = (try? database.query("SELECT path, file_size, modified_at, analysed, format, page_count FROM books WHERE library_id = ?",
+                                        [libraryID])) ?? []
         var known: [String: (size: Int64, modified: Double?, analysed: Bool)] = [:]
         for row in rows {
-            known[row.string("path") ?? ""] = (Int64(row.int("file_size") ?? 0), row.double("modified_at"), row.bool("analysed"))
+            let uncounted = row.string("format") == BookFormat.pdf.rawValue && row.int("page_count") == nil
+            known[row.string("path") ?? ""] = (Int64(row.int("file_size") ?? 0), row.double("modified_at"), row.bool("analysed") && !uncounted)
         }
         return known
     }

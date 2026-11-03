@@ -200,6 +200,15 @@ struct ThumbnailerTests {
         #endif
     }
 
+    #if canImport(CoreGraphics) && canImport(ImageIO)
+    /// ImageIO would lay transparency on black; the Mac's thumbnails lay it on white, like Linux's.
+    @Test func laysTransparencyOnWhiteOnTheMac() throws {
+        let thumbnail = try #require(Thumbnailer.jpeg(Self.alphaPNG, maxPixelSize: 48))
+        let image = try #require(Self.pixels(of: thumbnail))
+        Self.expectQuarters(of: image, [Self.white, Self.green, Self.blue, Self.black])
+    }
+    #endif
+
     /// An image smaller than the size asked for keeps its size.
     @Test func neverEnlarges() throws {
         #if (canImport(CoreGraphics) && canImport(ImageIO)) || (canImport(CTurboJPEG) && canImport(CPNG) && canImport(CWebP))

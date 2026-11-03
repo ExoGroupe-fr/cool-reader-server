@@ -56,7 +56,7 @@ nonisolated enum OPDSRoutes {
                     Link(rel: "http://opds-spec.org/acquisition", href: "/api/v1/books/\(book.id)/file", type: book.format.mediaType,
                          length: book.fileSize),
                 ]
-                if let count = book.pageCount, !book.pagePaths.isEmpty {
+                if let count = book.pageCount, !book.pagePaths.isEmpty || book.format == .pdf {
                     links.append(Link(rel: "http://vaemendis.net/opds-pse/stream",
                                       href: "/api/v1/books/\(book.id)/pages/{pageNumber}?width={maxWidth}", type: "image/jpeg",
                                       pageCount: count))
