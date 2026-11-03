@@ -81,7 +81,20 @@ nonisolated struct ProgressRecord: Codable, Sendable, Equatable {
     var bookID: Int
     var page: Int
     var finished: Bool
+    /// Where a text book is open, in the app's own words; the server only keeps it.
+    var position: String?
+    /// How much is read, 0 to 1.
+    var fraction: Double?
     var updatedAt: Date
+}
+
+/// A link that signs one device in as a member, once, before it expires. Only the secret's SHA-256 is stored.
+nonisolated struct InvitationRecord: Sendable, Equatable {
+    var id: Int
+    var userID: Int
+    var createdAt: Date
+    var expiresAt: Date
+    var usedAt: Date?
 }
 
 /// What a scan found for one file: its analysis, or why it couldn't be read.
@@ -103,7 +116,21 @@ nonisolated final class Store: Sendable {
 
     private func migrate() throws {
         let version = try database.first("PRAGMA user_version")?.int("user_version") ?? 0
-        guard version < 1 else { return }
+        if version < 1 { try createTables() }
+        if version < 2 {
+            try database.transaction {
+                try database.execute("""
+                    CREATE TABLE invitations (id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                        secret_hash TEXT NOT NULL UNIQUE, created_at REAL NOT NULL, expires_at REAL NOT NULL, used_at REAL)
+                    """)
+                try database.execute("ALTER TABLE progress ADD COLUMN position TEXT")
+                try database.execute("ALTER TABLE progress ADD COLUMN fraction REAL")
+                try database.execute("PRAGMA user_version = 2")
+            }
+        }
+    }
+
+    private func createTables() throws {
         try database.transaction {
             try database.execute("CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
             try database.execute("""
@@ -327,6 +354,10 @@ nonisolated final class Store: Sendable {
         ((try? database.query("SELECT * FROM books WHERE series_id = ? ORDER BY position", [seriesID])) ?? []).map(book(from:))
     }
 
+    func books(libraryID: Int) -> [BookRecord] {
+        ((try? database.query("SELECT * FROM books WHERE library_id = ? ORDER BY series_id, position", [libraryID])) ?? []).map(book(from:))
+    }
+
     func book(id: Int) -> BookRecord? {
         (try? database.first("SELECT * FROM books WHERE id = ?", [id])).flatMap { $0.map(book(from:)) }
     }
@@ -438,24 +469,66 @@ nonisolated final class Store: Sendable {
 
     // MARK: - Progress
 
-    func setProgress(userID: Int, bookID: Int, page: Int, finished: Bool) throws {
+    /// Keeps the newer of what is stored and `progress`: a device that read offline sends its progress later, with
+    /// the time it was read.
+    func setProgress(userID: Int, _ progress: ProgressRecord) throws {
         try database.execute("""
-            INSERT INTO progress (user_id, book_id, page, finished, updated_at) VALUES (?, ?, ?, ?, ?)
-            ON CONFLICT(user_id, book_id) DO UPDATE SET page = excluded.page, finished = excluded.finished, updated_at = excluded.updated_at
-            """, [userID, bookID, page, finished, Date()])
+            INSERT INTO progress (user_id, book_id, page, finished, position, fraction, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(user_id, book_id) DO UPDATE SET page = excluded.page, finished = excluded.finished,
+                position = excluded.position, fraction = excluded.fraction, updated_at = excluded.updated_at
+            WHERE excluded.updated_at >= progress.updated_at
+            """, [userID, progress.bookID, progress.page, progress.finished, progress.position, progress.fraction, progress.updatedAt])
     }
 
     func progress(userID: Int, since: Date? = nil) -> [ProgressRecord] {
         let rows = (try? database.query("SELECT * FROM progress WHERE user_id = ? AND updated_at > ? ORDER BY updated_at",
                                         [userID, since ?? Date(timeIntervalSince1970: 0)])) ?? []
-        return rows.map { row in
-            ProgressRecord(bookID: row.int("book_id") ?? 0, page: row.int("page") ?? 0, finished: row.bool("finished"),
-                           updatedAt: row.date("updated_at") ?? Date())
-        }
+        return rows.map(progress(from:))
     }
 
     func progress(userID: Int, bookID: Int) -> ProgressRecord? {
-        guard let row = try? database.first("SELECT * FROM progress WHERE user_id = ? AND book_id = ?", [userID, bookID]) else { return nil }
-        return ProgressRecord(bookID: bookID, page: row.int("page") ?? 0, finished: row.bool("finished"), updatedAt: row.date("updated_at") ?? Date())
+        (try? database.first("SELECT * FROM progress WHERE user_id = ? AND book_id = ?", [userID, bookID])).flatMap { $0.map(progress(from:)) }
+    }
+
+    private func progress(from row: Row) -> ProgressRecord {
+        ProgressRecord(bookID: row.int("book_id") ?? 0, page: row.int("page") ?? 0, finished: row.bool("finished"),
+                       position: row.string("position"), fraction: row.double("fraction"), updatedAt: row.date("updated_at") ?? Date())
+    }
+
+    // MARK: - Invitations
+
+    func addInvitation(userID: Int, secretHash: String, expiresAt: Date) throws -> Int {
+        try database.insert("INSERT INTO invitations (user_id, secret_hash, created_at, expires_at) VALUES (?, ?, ?, ?)",
+                            [userID, secretHash, Date(), expiresAt])
+    }
+
+    func invitation(secretHash: String) -> InvitationRecord? {
+        (try? database.first("SELECT * FROM invitations WHERE secret_hash = ?", [secretHash])).flatMap { $0.map(invitation(from:)) }
+    }
+
+    /// The invitations still waiting for a device, the newest first.
+    func openInvitations() -> [InvitationRecord] {
+        ((try? database.query("SELECT * FROM invitations WHERE used_at IS NULL AND expires_at > ? ORDER BY created_at DESC", [Date()])) ?? [])
+            .map(invitation(from:))
+    }
+
+    /// Spends an invitation on a new device, in one transaction: two devices racing with one link get one token.
+    func redeemInvitation(id: Int, deviceName: String, tokenHash: String) throws -> Bool {
+        try database.transaction {
+            guard let row = try database.first("SELECT * FROM invitations WHERE id = ? AND used_at IS NULL AND expires_at > ?", [id, Date()]),
+                  let userID = row.int("user_id") else { return false }
+            try database.execute("UPDATE invitations SET used_at = ? WHERE id = ?", [Date(), id])
+            _ = try addDevice(userID: userID, name: deviceName, kind: "app", tokenHash: tokenHash)
+            return true
+        }
+    }
+
+    func removeInvitation(id: Int) throws {
+        try database.execute("DELETE FROM invitations WHERE id = ?", [id])
+    }
+
+    private func invitation(from row: Row) -> InvitationRecord {
+        InvitationRecord(id: row.int("id") ?? 0, userID: row.int("user_id") ?? 0, createdAt: row.date("created_at") ?? Date(),
+                         expiresAt: row.date("expires_at") ?? Date(), usedAt: row.date("used_at"))
     }
 }

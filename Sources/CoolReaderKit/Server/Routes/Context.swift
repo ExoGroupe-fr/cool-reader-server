@@ -22,6 +22,8 @@ nonisolated final class ServerContext: Sendable {
     let throttle = LoginThrottle()
     let setup: SetupState
     let serverID: String
+    let certificate: ServerCertificate
+    let network = NetworkState()
     private let basicLogins = VerifiedLogins()
 
     init(config: ServerConfig, store: Store) throws {
@@ -38,6 +40,68 @@ nonisolated final class ServerContext: Sendable {
             try store.setSetting("server_id", serverID)
         }
         setup = SetupState(needed: store.userCount() == 0, file: config.configDirectory.appendingPathComponent("setup-code.txt"))
+        certificate = try ServerCertificate.loadOrCreate(in: config.configDirectory.appendingPathComponent("tls"))
+    }
+
+    /// The name devices show: the admin's choice, else the configuration's.
+    var serverName: String { store.setting("server_name") ?? config.serverName }
+
+    // MARK: - Invitations
+
+    nonisolated struct Invitation: Sendable {
+        let secret: String
+        let link: String
+        let expiresAt: Date
+    }
+
+    /// A link that signs one device in as `user`. It carries the addresses to try and the certificate's fingerprint,
+    /// so the app trusts this server from the first connection, at home or away.
+    func invite(_ user: UserRecord, lifetime: TimeInterval, addresses: [String]) throws -> Invitation {
+        let secret = Tokens.make()
+        let expiresAt = Date().addingTimeInterval(lifetime)
+        _ = try store.addInvitation(userID: user.id, secretHash: Tokens.hash(secret), expiresAt: expiresAt)
+        var components = URLComponents()
+        components.scheme = "coolreader"
+        components.host = "connect"
+        components.queryItems = [
+            URLQueryItem(name: "s", value: serverID),
+            URLQueryItem(name: "n", value: serverName),
+            URLQueryItem(name: "a", value: addresses.joined(separator: ",")),
+            URLQueryItem(name: "fp", value: certificate.fingerprint),
+            URLQueryItem(name: "i", value: secret),
+        ]
+        return Invitation(secret: secret, link: components.string ?? "", expiresAt: expiresAt)
+    }
+
+    /// Where devices reach this server, best first, as "host:port": the configured addresses, the one a browser used
+    /// (unless it's this machine itself), the network's, then the public ones.
+    func addresses(requestHost: String?, local: [String], public publicEndpoints: [String]) -> [String] {
+        var addresses = config.publishedAddresses
+        if let host = requestHost?.lowercased(), !["localhost", "127.0.0.1", "[::1]"].contains(where: { host == $0 || host.hasPrefix($0 + ":") }) {
+            addresses.append(host.contains(":") && !host.hasSuffix("]") ? host : "\(host):\(config.port)")
+        }
+        addresses += local.map { $0.contains(":") ? "[\($0)]:\(config.port)" : "\($0):\(config.port)" }
+        addresses += publicEndpoints
+        var seen: Set<String> = []
+        return addresses.filter { seen.insert($0).inserted }
+    }
+
+    /// Spends an invitation's secret on a device; nil when it's unknown, used or expired. Wrong secrets count as
+    /// failed sign-ins for the address.
+    func redeem(invitation secret: String, deviceName: String, from address: String?) async throws -> (token: String, user: UserRecord)? {
+        let keys = ["invite:" + (address ?? "?")]
+        guard await !throttle.isBlocked(keys) else {
+            throw HTTPError(status: .tooManyRequests, message: "Too many attempts. Try again in a quarter of an hour.")
+        }
+        guard let invitation = store.invitation(secretHash: Tokens.hash(secret)), let user = store.user(id: invitation.userID) else {
+            await throttle.failed(keys)
+            return nil
+        }
+        let token = Tokens.make()
+        guard try store.redeemInvitation(id: invitation.id, deviceName: String(deviceName.prefix(60)), tokenHash: Tokens.hash(token)) else {
+            return nil
+        }
+        return (token, user)
     }
 
     // MARK: - Signing in
@@ -154,6 +218,16 @@ actor SetupState {
         code = nil
         try? FileManager.default.removeItem(at: file)
     }
+}
+
+/// The addresses this server is known at, kept current by its network services: the machine's own on the home
+/// network, and the public ones when remote access works.
+actor NetworkState {
+    private(set) var local: [String] = []
+    private(set) var publicEndpoints: [String] = []
+
+    func update(local: [String]) { self.local = local }
+    func update(publicEndpoints: [String]) { self.publicEndpoints = publicEndpoints }
 }
 
 /// Basic credentials already checked, for ten minutes: OPDS readers send them with every request, and checking

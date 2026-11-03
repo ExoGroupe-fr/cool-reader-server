@@ -15,6 +15,9 @@ nonisolated struct ServerConfig: Sendable {
     /// Libraries to add if missing: name and path (`--library Mangas=/volume1/Mangas`).
     var libraries: [(name: String, path: String)] = []
     var serverName = "Cool Reader Server"
+    /// "host:port" addresses that devices reach this server at, for invitations: needed in Docker's bridge network,
+    /// where the container doesn't know the host's address (`--address nas.local:7272`, COOLREADER_ADDRESSES).
+    var publishedAddresses: [String] = []
 
     static func load(arguments: [String], environment: [String: String]) -> ServerConfig {
         var config = ServerConfig(configDirectory: URL(fileURLWithPath: environment["COOLREADER_CONFIG"] ?? "config", isDirectory: true))
@@ -25,6 +28,9 @@ nonisolated struct ServerConfig: Sendable {
         if let online = environment["COOLREADER_ONLINE_METADATA"] { config.onlineMetadata = !["0", "false", "no"].contains(online.lowercased()) }
         if let minutes = environment["COOLREADER_SCAN_INTERVAL"].flatMap(Int.init) { config.scanInterval = max(1, minutes) }
         if let name = environment["COOLREADER_NAME"] { config.serverName = name }
+        if let addresses = environment["COOLREADER_ADDRESSES"] {
+            config.publishedAddresses = addresses.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+        }
         var index = 1
         while index < arguments.count {
             let argument = arguments[index]
@@ -36,6 +42,8 @@ nonisolated struct ServerConfig: Sendable {
             case "--metadata-language": value.map { config.metadataLanguage = $0 }; index += 1
             case "--metadata-country": value.map { config.metadataCountry = $0 }; index += 1
             case "--offline": config.onlineMetadata = false
+            case "--address": value.map { config.publishedAddresses.append($0) }; index += 1
+            case "--name": value.map { config.serverName = $0 }; index += 1
             case "--library":
                 if let value, let equals = value.firstIndex(of: "=") {
                     config.libraries.append((String(value[..<equals]), String(value[value.index(after: equals)...])))

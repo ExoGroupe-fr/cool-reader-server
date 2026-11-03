@@ -64,7 +64,7 @@ nonisolated enum AdminRoutes {
             if await context.setup.isNeeded { return .redirect("/setup") }
             guard let caller = await context.caller(request) else { return .redirect("/login") }
             let strings = Strings(request.language)
-            var page = WebPage(title: context.config.serverName, strings: strings, caller: caller)
+            var page = WebPage(title: context.serverName, strings: strings, caller: caller)
             let libraries = context.store.visibleLibraries(for: caller.user)
             if caller.user.isAdmin {
                 let scanning = await context.scanner.isScanning
@@ -202,8 +202,11 @@ nonisolated enum AdminRoutes {
             if let message = request.query["error"] { page.add("<p class=\"error\">\(h(strings[message]))</p>") }
             if request.query["saved"] != nil { page.add("<p class=\"ok\">\(h(strings["saved"]))</p>") }
             page.add("<div class=\"rows\">")
-            for user in context.store.users() {
-                page.add("<div class=\"member\"><div class=\"who\"><strong>\(h(user.name))</strong> <span class=\"tag\">\(h(strings[user.isAdmin ? "admin" : "member"]))</span></div>")
+            let users = context.store.users()
+            for user in users {
+                let appOnly = context.store.credentials(name: user.name)?.1.isEmpty == true
+                page.add("<div class=\"member\"><div class=\"who\"><strong>\(h(user.name))</strong> <span class=\"tag\">\(h(strings[user.isAdmin ? "admin" : "member"]))</span>\(appOnly ? " <span class=\"tag\">\(h(strings["appOnly"]))</span>" : "")</div>")
+                page.add("<form method=\"post\" action=\"/members/\(user.id)/invite\" class=\"inline\"><button class=\"quiet\">\(h(strings["inviteDevice"]))</button></form>")
                 if !user.isAdmin {
                     page.add("<form method=\"post\" action=\"/members/\(user.id)\" class=\"choices\">\(libraryChoices(libraries, all: user.allLibraries, chosen: user.libraryIDs, strings: strings))<button class=\"quiet\">\(h(strings["save"]))</button></form>")
                 }
@@ -216,27 +219,43 @@ nonisolated enum AdminRoutes {
                 page.add("</div>")
             }
             page.add("</div>")
+            let invitations = context.store.openInvitations()
+            if !invitations.isEmpty {
+                page.add("<h2>\(h(strings["openInvitations"]))</h2><div class=\"rows\">")
+                for invitation in invitations {
+                    let name = users.first { $0.id == invitation.userID }?.name ?? "?"
+                    page.add("""
+                        <div class="row"><div><strong>\(h(name))</strong><span>\(h(strings["expires"])) \(h(strings.date(invitation.expiresAt)))</span></div>
+                        <form method="post" action="/invitations/\(invitation.id)/remove"><button class="quiet danger">\(h(strings["cancel"]))</button></form></div>
+                        """)
+                }
+                page.add("</div>")
+            }
             page.add("""
                 <h2>\(h(strings["addMember"]))</h2>
                 <form class="stack" method="post" action="/members">
                 <label>\(h(strings["name"]))<input name="name" required autocomplete="off"></label>
-                <label>\(h(strings["password"]))<input type="password" name="password" minlength="8" required autocomplete="new-password"></label>
                 <fieldset class="choices">\(libraryChoices(libraries, all: false, chosen: [], strings: strings))</fieldset>
-                <button>\(h(strings["add"]))</button></form>
+                <label>\(h(strings["passwordOptional"]))<input type="password" name="password" minlength="8" autocomplete="new-password"></label>
+                <p class="hint">\(h(strings["passwordOptionalHint"]))</p>
+                <button>\(h(strings["addAndInvite"]))</button></form>
                 """)
             return .html(page.html)
         }
 
+        // A member without a password reads with Cool Reader only: the invitation shown next signs their device in.
         router.add(.POST, "/members") { request in
-            _ = try await adminAction(request, context)
+            let caller = try await adminAction(request, context)
             let form = request.form
             let name = (form["name"] ?? "").trimmingCharacters(in: .whitespaces)
             let password = form["password"] ?? ""
-            if let problem = problem(name: name, password: password, again: nil) { return .redirect("/members?error=\(problem)") }
+            if name.isEmpty { return .redirect("/members?error=nameMissing") }
+            if !password.isEmpty, let problem = problem(name: name, password: password, again: nil) { return .redirect("/members?error=\(problem)") }
             guard context.store.credentials(name: name) == nil else { return .redirect("/members?error=nameTaken") }
-            _ = try context.store.createUser(name: name, passwordHash: Passwords.hash(password), isAdmin: false,
-                                             allLibraries: form["all"] != nil, libraryIDs: request.formValues("library").compactMap { Int($0) })
-            return .redirect("/members?saved=1")
+            let id = try context.store.createUser(name: name, passwordHash: password.isEmpty ? "" : Passwords.hash(password), isAdmin: false,
+                                                  allLibraries: form["all"] != nil, libraryIDs: request.formValues("library").compactMap { Int($0) })
+            guard let user = context.store.user(id: id) else { throw HTTPError.notFound }
+            return try await InvitationRoutes.invitationPage(for: user, lifetime: 48 * 3600, caller: caller, request: request, context: context)
         }
 
         router.add(.POST, "/members/:id") { request in
@@ -273,6 +292,8 @@ nonisolated enum AdminRoutes {
             if let paired = request.query["paired"] { page.add("<p class=\"ok\">\(h(paired)) ✓</p>") }
             let options = users.map { "<option value=\"\($0.id)\">\(h($0.name))</option>" }.joined()
             page.add("""
+                <h2>\(h(strings["addMyDevice"]))</h2><p class="hint">\(h(strings["addMyDeviceIntro"]))</p>
+                <form method="post" action="/devices/invite"><button>\(h(strings["showQRCode"]))</button></form>
                 <h2>\(h(strings["pairDevice"]))</h2><p class="hint">\(h(strings["pairIntro"]))</p>
                 <form class="inline wide" method="post" action="/devices/pair">
                 <input name="code" inputmode="numeric" autocomplete="one-time-code" placeholder="482 715" required class="code">
@@ -314,20 +335,20 @@ nonisolated enum AdminRoutes {
     // MARK: - Helpers
 
     /// Forms only from this server's own pages: a page elsewhere can't make a signed-in admin's browser post here.
-    private static func checkOrigin(_ request: Request) throws {
+    static func checkOrigin(_ request: Request) throws {
         guard let origin = request.header("Origin"), origin != "null" else { return }
         guard let host = request.header("Host"), URL(string: origin)?.host.map({ host == $0 || host.hasPrefix($0 + ":") }) == true else {
             throw HTTPError(status: .forbidden, message: "This form comes from another site.")
         }
     }
 
-    private static func adminPage(_ request: Request, _ context: ServerContext) async throws -> Caller {
+    static func adminPage(_ request: Request, _ context: ServerContext) async throws -> Caller {
         guard let caller = await context.caller(request) else { throw HTTPError.unauthorized }
         guard caller.user.isAdmin else { throw HTTPError.forbidden }
         return caller
     }
 
-    private static func adminAction(_ request: Request, _ context: ServerContext) async throws -> Caller {
+    static func adminAction(_ request: Request, _ context: ServerContext) async throws -> Caller {
         try checkOrigin(request)
         return try await context.requireAdmin(request)
     }
@@ -422,7 +443,8 @@ nonisolated struct WebPage {
     var html: String {
         var links = [("/", strings["home"])]
         if caller.user.isAdmin {
-            links += [("/libraries", strings["libraries"]), ("/members", strings["members"]), ("/devices", strings["devices"])]
+            links += [("/libraries", strings["libraries"]), ("/members", strings["members"]), ("/devices", strings["devices"]),
+                      ("/server", strings["server"])]
         }
         let menu = links.map { "<a href=\"\($0.0)\">\(h($0.1))</a>" }.joined()
         return Self.document(title: title, language: strings.language, body: """
@@ -508,5 +530,10 @@ nonisolated struct WebPage {
     .error { color: var(--danger); }
     .ok { color: var(--ok); }
     code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.92em; }
+    .invite { display: flex; flex-wrap: wrap; gap: 20px 32px; align-items: center; margin: 8px 0 20px; }
+    .qr svg { width: 240px; height: auto; display: block; border-radius: 8px; }
+    .steps { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 8px; max-width: 46ch; }
+    .fingerprint { overflow-wrap: anywhere; font-size: 13px; }
+    #invitation-link { width: 100%; max-width: 640px; font-size: 13px; margin-bottom: 4px; }
     """
 }

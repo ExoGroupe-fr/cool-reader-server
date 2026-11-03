@@ -3,16 +3,21 @@ import NIOCore
 import NIOFoundationCompat
 import NIOHTTP1
 import NIOPosix
+import NIOSSL
 
 /// A request, read whole: bodies are small (forms, JSON), the files only go out.
 nonisolated struct Request: Sendable {
     var method: HTTPMethod
+    /// As the client sent it: path and query, encoded.
+    var uri = "/"
     /// Percent-decoded, without the query.
     var path: String
     var query: [String: String]
     var headers: HTTPHeaders
     var body: Data
     var remoteAddress: String?
+    /// Came over TLS.
+    var isSecure = false
     /// Filled by the router from the route's `:name` segments.
     var parameters: [String: String] = [:]
 
@@ -45,8 +50,45 @@ nonisolated struct Request: Sendable {
         }
     }
 
+    /// The body as JSON; dates in ISO 8601, with or without fractions of a second.
     func json<T: Decodable>(_ type: T.Type) throws -> T {
-        try JSONDecoder().decode(type, from: body)
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .custom { decoder in
+            let text = try decoder.singleValueContainer().decode(String.self)
+            let formatter = ISO8601DateFormatter()
+            if let date = formatter.date(from: text) { return date }
+            formatter.formatOptions.insert(.withFractionalSeconds)
+            guard let date = formatter.date(from: text) else {
+                throw DecodingError.dataCorrupted(.init(codingPath: decoder.codingPath, debugDescription: "Not an ISO 8601 date."))
+            }
+            return date
+        }
+        return try decoder.decode(type, from: body)
+    }
+
+    /// From this machine, the home network or a VPN (private, link-local and shared 100.64/10 addresses). Requests
+    /// from anywhere else must come over TLS.
+    var isFromLocalNetwork: Bool {
+        guard let address = remoteAddress else { return false }
+        return Self.isLocal(address)
+    }
+
+    static func isLocal(_ address: String) -> Bool {
+        var text = address.lowercased()
+        if text.hasPrefix("::ffff:"), text.contains(".") { text = String(text.dropFirst(7)) }
+        if text.contains(":") {
+            guard let first = text.split(separator: ":", omittingEmptySubsequences: false).first else { return false }
+            if text == "::1" { return true }
+            let group = UInt16(first, radix: 16) ?? 0
+            return group & 0xFE00 == 0xFC00 || group & 0xFFC0 == 0xFE80
+        }
+        let parts = text.split(separator: ".").compactMap { UInt8($0) }
+        guard parts.count == 4 else { return false }
+        switch (parts[0], parts[1]) {
+        case (127, _), (10, _), (192, 168), (169, 254): return true
+        case (172, 16...31), (100, 64...127): return true
+        default: return false
+        }
     }
 
     /// French when the browser or the app asks for it first, else English.
@@ -205,19 +247,28 @@ nonisolated struct HTTPError: Error {
     static func badRequest(_ message: String) -> HTTPError { HTTPError(status: .badRequest, message: message) }
 }
 
-/// The HTTP/1.1 server, on SwiftNIO: one task per connection, requests answered in turn.
+/// The HTTP/1.1 server, on SwiftNIO: one task per connection, requests answered in turn. With a TLS context, the
+/// same port answers HTTPS too. It runs until its task is cancelled.
 nonisolated enum HTTPServer {
     static let maximumBodySize = 4 << 20
 
-    static func run(host: String, port: Int, handler: @escaping @Sendable (Request) async -> Response,
+    private struct Connection: Sendable {
+        let channel: NIOAsyncChannel<HTTPServerRequestPart, HTTPServerResponsePart>
+        let info: ConnectionInfo
+    }
+
+    static func run(host: String, port: Int, tls: NIOSSLContext? = nil, handler: @escaping @Sendable (Request) async -> Response,
                     onListening: @escaping @Sendable (Int) -> Void = { _ in }) async throws {
         let server = try await ServerBootstrap(group: MultiThreadedEventLoopGroup.singleton)
             .serverChannelOption(.backlog, value: 256)
             .serverChannelOption(.socketOption(.so_reuseaddr), value: 1)
             .bind(host: host, port: port) { channel in
                 channel.eventLoop.makeCompletedFuture {
+                    let info = ConnectionInfo()
+                    if let tls { try channel.pipeline.syncOperations.addHandler(ProtocolSniffer(sslContext: tls, connection: info)) }
                     try channel.pipeline.syncOperations.configureHTTPServerPipeline()
-                    return try NIOAsyncChannel<HTTPServerRequestPart, HTTPServerResponsePart>(wrappingChannelSynchronously: channel)
+                    let wrapped = try NIOAsyncChannel<HTTPServerRequestPart, HTTPServerResponsePart>(wrappingChannelSynchronously: channel)
+                    return Connection(channel: wrapped, info: info)
                 }
             }
         onListening(server.channel.localAddress?.port ?? port)
@@ -230,11 +281,10 @@ nonisolated enum HTTPServer {
         }
     }
 
-    private static func serve(_ connection: NIOAsyncChannel<HTTPServerRequestPart, HTTPServerResponsePart>,
-                              handler: @Sendable (Request) async -> Response) async {
-        let remote = connection.channel.remoteAddress?.ipAddress
+    private static func serve(_ connection: Connection, handler: @Sendable (Request) async -> Response) async {
+        let remote = connection.channel.channel.remoteAddress?.ipAddress
         do {
-            try await connection.executeThenClose { inbound, outbound in
+            try await connection.channel.executeThenClose { inbound, outbound in
                 var head: HTTPRequestHead?
                 var body = ByteBuffer()
                 var tooLarge = false
@@ -256,7 +306,9 @@ nonisolated enum HTTPServer {
                         if tooLarge {
                             response = .error(.payloadTooLarge, "Request too large.")
                         } else {
-                            response = await handler(request(from: requestHead, body: body, remote: remote))
+                            var request = request(from: requestHead, body: body, remote: remote)
+                            request.isSecure = connection.info.isSecure
+                            response = await handler(request)
                         }
                         try await write(response, for: requestHead, to: outbound)
                         if !requestHead.isKeepAlive { return }
@@ -274,7 +326,7 @@ nonisolated enum HTTPServer {
         let rawPath = parts.first.map(String.init) ?? "/"
         let path = rawPath.removingPercentEncoding ?? rawPath
         let query = parts.count > 1 ? Request.decodeQuery(String(parts[1])) : [:]
-        return Request(method: head.method, path: path, query: query, headers: head.headers, body: Data(buffer: body),
+        return Request(method: head.method, uri: head.uri, path: path, query: query, headers: head.headers, body: Data(buffer: body),
                        remoteAddress: remote)
     }
 

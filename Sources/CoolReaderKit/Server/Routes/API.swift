@@ -1,3 +1,4 @@
+import Crypto
 import Foundation
 import NIOHTTP1
 
@@ -9,6 +10,25 @@ nonisolated enum APIRoutes {
         var version: String
         var apiVersion = 1
         var setupRequired: Bool
+        /// SHA-256 of the server's certificate, lowercase hex. The app pins it.
+        var fingerprint: String
+    }
+
+    struct Addresses: Codable {
+        /// "host:port", best first: the home network's, then the public ones when remote access works.
+        var addresses: [String]
+    }
+
+    struct LibraryContents: Codable {
+        var library: LibraryInfo
+        var series: [SeriesInfo]
+        /// Without progress: that comes from /api/v1/progress.
+        var books: [BookInfo]
+    }
+
+    struct Redeem: Decodable {
+        var invitation: String
+        var device: String
     }
 
     struct UserInfo: Codable {
@@ -67,6 +87,8 @@ nonisolated enum APIRoutes {
         var bookID: Int
         var page: Int
         var finished: Bool
+        var position: String?
+        var fraction: Double?
         var updatedAt: Date
     }
 
@@ -104,12 +126,33 @@ nonisolated enum APIRoutes {
     struct ProgressUpdate: Decodable {
         var page: Int
         var finished: Bool?
+        /// The app's own position in a text book, kept as it is.
+        var position: String?
+        var fraction: Double?
+        /// When it was read; the newer of two updates wins. Now when missing.
+        var updatedAt: Date?
     }
 
     static func add(to router: inout Router, context: ServerContext) {
         router.add(.GET, "/api/v1/server") { _ in
-            .json(ServerInfo(name: context.config.serverName, id: context.serverID, version: ServerContext.version,
-                             setupRequired: await context.setup.isNeeded))
+            .json(ServerInfo(name: context.serverName, id: context.serverID, version: ServerContext.version,
+                             setupRequired: await context.setup.isNeeded, fingerprint: context.certificate.fingerprint))
+        }
+
+        router.add(.GET, "/api/v1/server/addresses") { request in
+            _ = try await context.requireCaller(request)
+            return .json(Addresses(addresses: context.addresses(requestHost: nil, local: await context.network.local,
+                                                                public: await context.network.publicEndpoints)))
+        }
+
+        router.add(.POST, "/api/v1/invitations/redeem") { request in
+            let redeem = try decode(Redeem.self, request)
+            guard let (token, user) = try await context.redeem(invitation: redeem.invitation, deviceName: redeem.device,
+                                                               from: request.remoteAddress) else {
+                throw HTTPError(status: .gone, message: "This invitation is unknown, used or expired. Ask for a new one.")
+            }
+            Log.info("« \(redeem.device.prefix(60)) » joined as \(user.name) with an invitation.")
+            return .json(Token(token: token, user: info(user)))
         }
 
         router.add(.POST, "/api/v1/login") { request in
@@ -155,6 +198,16 @@ nonisolated enum APIRoutes {
             let caller = try await context.requireCaller(request)
             let library = try context.visibleLibrary(request.parameter("id"), for: caller)
             return .json(context.store.series(libraryID: library.id).map(info))
+        }
+
+        router.add(.GET, "/api/v1/libraries/:id/contents") { request in
+            let caller = try await context.requireCaller(request)
+            let library = try context.visibleLibrary(request.parameter("id"), for: caller)
+            let contents = LibraryContents(
+                library: LibraryInfo(id: library.id, name: library.name, seriesCount: library.seriesCount, bookCount: library.bookCount),
+                series: context.store.series(libraryID: library.id).map(info),
+                books: context.store.books(libraryID: library.id).map { info($0, progress: nil) })
+            return conditional(.json(contents), request: request)
         }
 
         router.add(.GET, "/api/v1/search") { request in
@@ -219,8 +272,11 @@ nonisolated enum APIRoutes {
             let caller = try await context.requireCaller(request)
             let (book, _, _) = try context.visibleBook(request.parameter("id"), for: caller)
             let update = try decode(ProgressUpdate.self, request)
-            try context.store.setProgress(userID: caller.user.id, bookID: book.id, page: max(0, update.page),
-                                          finished: update.finished ?? false)
+            let fraction = update.fraction.map { min(max($0, 0), 1) }
+            try context.store.setProgress(userID: caller.user.id, ProgressRecord(
+                bookID: book.id, page: max(0, update.page), finished: update.finished ?? false,
+                position: update.position.map { String($0.prefix(2000)) }, fraction: fraction,
+                updatedAt: min(update.updatedAt ?? Date(), Date())))
             return .json(context.store.progress(userID: caller.user.id, bookID: book.id).map(info))
         }
 
@@ -229,6 +285,20 @@ nonisolated enum APIRoutes {
             let since = request.query["since"].flatMap { ISO8601DateFormatter().date(from: $0) }
             return .json(context.store.progress(userID: caller.user.id, since: since).map(info))
         }
+    }
+
+    /// A 304 instead of `response` when the client already has it: the app checks a library's contents often.
+    static func conditional(_ response: Response, request: Request) -> Response {
+        guard case .data(let data) = response.body else { return response }
+        let tag = "\"" + SHA256.hash(data: data).prefix(16).map { String(format: "%02x", $0) }.joined() + "\""
+        var response = response
+        response.headers.add(name: "ETag", value: tag)
+        response.headers.add(name: "Cache-Control", value: "private, no-cache")
+        if request.header("If-None-Match") == tag {
+            response.status = .notModified
+            response.body = .data(Data())
+        }
+        return response
     }
 
     static func decode<T: Decodable>(_ type: T.Type, _ request: Request) throws -> T {
@@ -260,6 +330,7 @@ nonisolated enum APIRoutes {
     }
 
     static func info(_ progress: ProgressRecord) -> ProgressInfo {
-        ProgressInfo(bookID: progress.bookID, page: progress.page, finished: progress.finished, updatedAt: progress.updatedAt)
+        ProgressInfo(bookID: progress.bookID, page: progress.page, finished: progress.finished, position: progress.position,
+                     fraction: progress.fraction, updatedAt: progress.updatedAt)
     }
 }

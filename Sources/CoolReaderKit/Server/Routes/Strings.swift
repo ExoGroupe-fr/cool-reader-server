@@ -73,6 +73,39 @@ nonisolated struct Strings: Sendable {
         "upcoming": ("À paraître", "Upcoming"),
         "cancelled": ("Annulé", "Cancelled"),
         "hiatus": ("En pause", "On hiatus"),
+        "server": ("Serveur", "Server"),
+        "serverName": ("Nom du serveur", "Server name"),
+        "serverNameHint": ("Le nom que Cool Reader affiche.", "The name Cool Reader shows."),
+        "homeAddresses": ("Adresses à la maison", "Home addresses"),
+        "noAddress": ("Adresse inconnue : ouvrez cette page avec l'adresse du serveur sur le réseau, pas localhost.",
+                      "Address unknown: open this page with the server's address on the network, not localhost."),
+        "certificate": ("Certificat", "Certificate"),
+        "certificateHint": ("Cool Reader chiffre ses connexions avec ce certificat, créé par le serveur. L'appli retient son empreinte et refuse de se connecter si elle change.",
+                            "Cool Reader encrypts its connections with this certificate, which the server made. The app remembers its fingerprint and refuses to connect if it changes."),
+        "invitation": ("Invitation", "Invitation"),
+        "inviteStep1": ("Installez Cool Reader sur l'iPhone ou l'iPad :", "Install Cool Reader on the iPhone or iPad:"),
+        "inviteStep2": ("Visez ce code avec l'appareil photo, ou ouvrez le lien sur l'appareil.", "Point the camera at this code, or open the link on the device."),
+        "inviteStep3": ("Cool Reader s'ouvre et se connecte au serveur.", "Cool Reader opens and connects to the server."),
+        "link": ("Lien", "Link"),
+        "copyLink": ("Copier le lien", "Copy the link"),
+        "share": ("Partager…", "Share…"),
+        "done": ("Terminé", "Done"),
+        "inviteOnce": ("Ce lien ne sera plus affiché : envoyez-le maintenant, par Messages ou e-mail.",
+                       "This link won't be shown again: send it now, by Messages or email."),
+        "inviteAddresses": ("Adresses dans le lien :", "Addresses in the link:"),
+        "inviteDevice": ("Inviter un appareil", "Invite a device"),
+        "openInvitations": ("Invitations en attente", "Waiting invitations"),
+        "expires": ("expire", "expires"),
+        "cancel": ("Annuler", "Cancel"),
+        "addAndInvite": ("Ajouter et inviter", "Add and invite"),
+        "passwordOptional": ("Mot de passe (facultatif)", "Password (optional)"),
+        "passwordOptionalHint": ("Seulement pour ce site et les lecteurs OPDS. Pour Cool Reader, l'invitation suffit.",
+                                 "Only for this site and OPDS readers. For Cool Reader, the invitation is enough."),
+        "addMyDevice": ("Ajouter un de mes appareils", "Add one of my devices"),
+        "addMyDeviceIntro": ("Un code QR à viser avec l'iPhone ou l'iPad, valable une demi-heure.",
+                             "A QR code to scan with the iPhone or iPad, valid for half an hour."),
+        "showQRCode": ("Afficher le code QR", "Show the QR code"),
+        "appOnly": ("appli seulement", "app only"),
     ]
 
     subscript(_ key: String) -> String {
@@ -133,6 +166,22 @@ nonisolated struct Strings: Sendable {
         formatter.dateStyle = .medium
         formatter.timeStyle = .short
         return formatter.string(from: date)
+    }
+
+    func invitationTitle(_ member: String?) -> String {
+        guard let member else { return language == "fr" ? "Ajouter un appareil" : "Add a device" }
+        return language == "fr" ? "Invitation pour \(member)" : "Invitation for \(member)"
+    }
+
+    func invitationValidity(_ until: Date) -> String {
+        language == "fr" ? "Valable jusqu'au \(date(until)), pour un seul appareil." : "Valid until \(date(until)), for one device."
+    }
+
+    /// What the admin sends a member: where to get the app, then the link.
+    func invitationMessage(server: String, appStore: String, link: String) -> String {
+        language == "fr"
+            ? "Voici une invitation pour lire les livres de « \(server) » avec Cool Reader.\n1. Installe Cool Reader : \(appStore)\n2. Ouvre ce lien sur ton iPhone ou iPad : \(link)"
+            : "Here's an invitation to read the books on \u{201C}\(server)\u{201D} with Cool Reader.\n1. Install Cool Reader: \(appStore)\n2. Open this link on your iPhone or iPad: \(link)"
     }
 
     func size(_ bytes: Int64) -> String {
