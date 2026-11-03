@@ -44,3 +44,13 @@ let package = Package(
         .systemLibrary(name: "CWebP", pkgConfig: "libwebp", providers: [.apt(["libwebp-dev"]), .brew(["webp"])]),
     ]
 )
+
+#if os(macOS)
+// The menu bar app, which runs the server in its own process (Scripts/build-mac-app.sh makes it an app). Linux and the
+// Docker build never see it.
+package.products.append(.executable(name: "CoolReaderServerMac", targets: ["CoolReaderServerMac"]))
+package.targets.append(.executableTarget(name: "CoolReaderServerMac", dependencies: [
+    "CoolReaderKit",
+    .product(name: "NIOCore", package: "swift-nio"),
+]))
+#endif
