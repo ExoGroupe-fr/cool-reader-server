@@ -1,0 +1,314 @@
+import Foundation
+
+/// What the matcher knows of a series from the library.
+nonisolated struct SeriesMatchInput: Sendable {
+    nonisolated struct Book: Sendable {
+        /// Identifies the book in `SeriesMatch.bookCovers`.
+        var key: String
+        var fileName: String
+        var number: Double?
+        var format: BookFormat
+    }
+
+    var folderTitle: String
+    var customTitle: String?
+    var folderPath: String?
+    var kind: UnitKind
+    /// Authors already known from the files (ComicInfo.xml, .nfo).
+    var authors: [String] = []
+    /// In reading order.
+    var books: [Book]
+}
+
+/// What the catalogues said about a series.
+nonisolated struct SeriesMatch: Sendable, Codable, Equatable {
+    enum Source: String, Sendable, Codable {
+        case anilist, mangadex, appleBooks, openLibrary
+    }
+
+    var source: Source
+    var anilistID: Int?
+    var mangadexID: String?
+    /// "ab:…" for Apple Books, "ol:…" for Open Library.
+    var catalogID: String?
+    /// The title the catalogue gives, close to the folder's; nil keeps the folder's.
+    var title: String?
+    var summary: String?
+    var authors: [String] = []
+    var genres: [String] = []
+    var year: Int?
+    /// finished, ongoing, upcoming, cancelled or hiatus.
+    var status: String?
+    var averageScore: Int?
+    var originalLanguage: String?
+    var coverURL: URL?
+    var bannerURL: URL?
+    /// Covers of single volumes, by book key.
+    var bookCovers: [String: URL] = [:]
+}
+
+/// The app's metadata agent without its database: manga from AniList then MangaDex, books (novels, essays, BD)
+/// from Apple Books then Open Library. The caller runs one series at a time, with a pause in between.
+nonisolated enum SeriesMatcher {
+    /// nil when nothing is convincing enough to apply without asking; throws when the catalogues can't be
+    /// reached, so that the series is tried again later.
+    static func match(_ series: SeriesMatchInput) async throws -> SeriesMatch? {
+        let query = series.folderTitle
+        // Novels come as EPUB, manga and BD as archives or PDF. Books are looked up first for EPUBs: AniList would
+        // pair a short novel title ("Germinal") with an unrelated manga, and Apple Books has light novels too.
+        let booksFirst = series.books.allSatisfy { $0.format == .epub }
+        if booksFirst, let match = try await matchBooks(series) { return match }
+        var media = try await bestAniList(for: query, series: series)
+        if media == nil, let variant = TitleMatcher.spellingVariant(query) {
+            media = try await bestAniList(for: variant, series: series, scoredAgainst: query)
+        }
+        if let media {
+            return await apply(media, to: series)
+        }
+        // MangaDex alone knows comics only: an EPUB novel would get the cover of its manga adaptation.
+        if !booksFirst, let manga = try await bestMangaDex(for: query) {
+            if let id = manga.aniListID, let media = try? await AniListClient.media(id: id) {
+                return await apply(media, to: series, mangaDex: manga)
+            }
+            return await applyMangaDexOnly(manga, to: series)
+        }
+        if !booksFirst, let match = try await matchBooks(series) { return match }
+        return nil
+    }
+
+    // MARK: - Manga
+
+    private static func bestAniList(for query: String, series: SeriesMatchInput, scoredAgainst original: String? = nil) async throws -> AniListMedia? {
+        let results = try await AniListClient.search(query, limit: 8)
+        return results
+            .compactMap { media in
+                TitleMatcher.rank(media, query: original ?? query, localCount: series.books.count, kind: series.kind).map { (media, $0) }
+            }
+            .max { $0.1 < $1.1 }?.0
+    }
+
+    private static func bestMangaDex(for query: String) async throws -> MangaDexClient.Manga? {
+        let results = try await MangaDexClient.search(query).filter { !$0.isFanEdition }
+        return results
+            .map { ($0, TitleMatcher.best(query, among: $0.titles).score) }
+            .filter { $0.1 >= 0.9 }
+            .max { $0.1 < $1.1 }?.0
+    }
+
+    private static func apply(_ media: AniListMedia, to series: SeriesMatchInput, mangaDex: MangaDexClient.Manga? = nil) async -> SeriesMatch {
+        var match = SeriesMatch(source: .anilist)
+        match.anilistID = media.id
+        match.originalLanguage = media.originalLanguage
+        match.title = preferredTitle(among: media.allTitles, fallback: media.title.english ?? media.title.romaji, folderTitle: series.folderTitle)
+        match.summary = media.cleanDescription
+        match.authors = series.authors.isEmpty ? media.authors : series.authors
+        match.genres = media.localizedGenres
+        match.year = media.startDate?.year
+        match.status = media.localizedStatus
+        match.averageScore = media.averageScore
+        match.coverURL = media.coverURL
+        match.bannerURL = media.bannerURL
+        var manga = mangaDex
+        if manga == nil { manga = await findMangaDex(for: media, title: match.title) }
+        if let manga { await enrich(&match, series: series, with: manga) }
+        return match
+    }
+
+    /// The MangaDex entry linked to this AniList entry. Never guessed from the title alone: a wrong entry
+    /// would show the covers of another series.
+    private static func findMangaDex(for media: AniListMedia, title: String?) async -> MangaDexClient.Manga? {
+        var queries: [String] = []
+        for title in [title, media.title.english, media.title.romaji] {
+            if let title, !queries.contains(title) { queries.append(title) }
+        }
+        for query in queries {
+            guard let results = try? await MangaDexClient.search(query) else { continue }
+            if let match = results.first(where: { $0.aniListID == media.id }) { return match }
+        }
+        return nil
+    }
+
+    private static func enrich(_ match: inout SeriesMatch, series: SeriesMatchInput, with manga: MangaDexClient.Manga) async {
+        match.mangadexID = manga.id
+        if let synopsis = manga.localizedDescription { match.summary = synopsis }
+        if series.kind == .volume, let covers = try? await MangaDexClient.volumeCovers(mangaID: manga.id) {
+            let preferred = MangaDexClient.preferredCovers(covers)
+            for book in series.books {
+                if let number = book.number, let url = preferred[number] { match.bookCovers[book.key] = url }
+            }
+        }
+    }
+
+    private static func applyMangaDexOnly(_ manga: MangaDexClient.Manga, to series: SeriesMatchInput) async -> SeriesMatch {
+        var match = SeriesMatch(source: .mangadex)
+        match.originalLanguage = manga.originalLanguage
+        match.title = preferredTitle(among: manga.titles, fallback: manga.mainTitle, folderTitle: series.folderTitle)
+        match.summary = manga.bestDescription
+        match.authors = series.authors.isEmpty ? manga.authors : series.authors
+        match.genres = manga.genres
+        match.year = manga.year
+        match.status = manga.localizedStatus
+        match.coverURL = manga.coverURL
+        await enrich(&match, series: series, with: manga)
+        return match
+    }
+
+    private static func preferredTitle(among titles: [String], fallback: String?, folderTitle: String) -> String {
+        let best = TitleMatcher.best(folderTitle, among: titles)
+        if best.score >= 0.75, let title = best.title { return FileNameParser.displayTitle(fromFolderName: title) }
+        return fallback ?? folderTitle
+    }
+
+    // MARK: - Books
+
+    /// Novels, essays and BD: Apple Books, then Open Library for what Apple doesn't sell. nil when nothing is
+    /// convincing enough to apply without asking.
+    private static func matchBooks(_ series: SeriesMatchInput) async throws -> SeriesMatch? {
+        let books = series.books
+        let query = bookQuery(for: series)
+        let language = MetadataLocale.language
+        // A misspelt author in a file name ("Jules Vernes") can hide the book: then the title alone, the author
+        // still checked by the ranking.
+        let searches: [(source: BookMatch.Source, term: String?)] = [(.appleBooks, nil)]
+            + (query.author != nil ? [(.appleBooks, query.searchTitle)] : [])
+            + [(.openLibrary, nil)]
+        guard books.count > 1 else {
+            for search in searches {
+                let results = search.source == .appleBooks
+                    ? try await AppleBooksClient.search(search.term ?? query.searchText)
+                    : try await OpenLibraryClient.search(title: query.searchTitle, author: query.author)
+                guard let found = BookMatcher.best(results, for: query, language: language) else { continue }
+                return await applyBook(found, to: series)
+            }
+            return nil
+        }
+        // A series of several books: one search for the series, each volume found in it by its own title or number,
+        // then a search for each volume with a title of its own that the first one missed.
+        var seriesQuery = query
+        seriesQuery.number = 1
+        for search in searches {
+            let pool = search.source == .appleBooks
+                ? try await AppleBooksClient.search(search.term ?? query.searchText, limit: 50)
+                : try await OpenLibraryClient.search(title: query.searchTitle, author: query.author, limit: 30)
+            let volumes = try await volumeMatches(for: series, pool: pool, searchesMissing: false)
+            // The series takes its first volume's book, or a result naming the series itself.
+            guard let lead = books.lazy.compactMap({ volumes[$0.key] }).first
+                    ?? BookMatcher.best(pool, for: seriesQuery, language: language, series: true) else { continue }
+            let complete = search.source == .appleBooks ? try await volumeMatches(for: series, pool: pool) : volumes
+            return await applyBook(lead, to: series, volumes: complete)
+        }
+        return nil
+    }
+
+    /// The volumes of a series in catalogue results. Volumes with a title of their own that the series search
+    /// missed get a search each, a dozen at most.
+    private static func volumeMatches(for series: SeriesMatchInput, pool: [BookMatch], searchesMissing: Bool = true) async throws -> [String: BookMatch] {
+        guard series.books.count > 1 else { return [:] }
+        let query = bookQuery(for: series)
+        let volumes = series.books.map { (key: $0.key, query: volumeQuery(for: $0, series: query)) }
+        var found = BookMatcher.volumes(volumes, in: pool, series: query, language: MetadataLocale.language)
+        guard searchesMissing else { return found }
+        let missing = volumes.filter { found[$0.key] == nil && TitleMatcher.similarity($0.query.title, query.title) < 0.9 }
+        for volume in missing.prefix(12) {
+            let results = try await AppleBooksClient.search(volume.query.searchText, limit: 10)
+            found[volume.key] = BookMatcher.best(results, for: volume.query, language: MetadataLocale.language)
+        }
+        return found
+    }
+
+    private static func applyBook(_ book: BookMatch, to series: SeriesMatchInput, volumes: [String: BookMatch] = [:]) async -> SeriesMatch {
+        var match = SeriesMatch(source: book.source == .appleBooks ? .appleBooks : .openLibrary)
+        var summary = book.summary
+        if summary == nil, book.source == .openLibrary {
+            summary = try? await OpenLibraryClient.summary(key: String(book.id.dropFirst(3)))
+        }
+        match.catalogID = book.id
+        if series.books.count > 1 || series.kind != .book {
+            // A volume's title is no name for the series, even when the folder holds a single volume ("Blacksad 01"):
+            // the catalogue's series name, or the folder's.
+            let name = seriesTitle(for: series)
+            if let catalogName = book.seriesName, TitleMatcher.similarity(catalogName, name.title) >= 0.75 {
+                match.title = catalogName
+            } else {
+                match.title = name.fromParentFolder ? name.title : nil
+            }
+        } else {
+            match.title = book.displayTitle
+        }
+        match.summary = summary
+        if series.authors.isEmpty {
+            // Store listings may name the translator first: the author from the file names leads.
+            let wanted = bookQuery(for: series).author
+            let isWanted = { (name: String) in wanted.map { BookMatcher.authorMatches($0, among: [name]) } ?? false }
+            match.authors = book.authors.filter(isWanted) + book.authors.filter { !isWanted($0) }
+        } else {
+            match.authors = series.authors
+        }
+        match.genres = book.genres
+        match.year = book.year
+        match.coverURL = book.coverURL
+        if series.books.count == 1, let first = series.books.first {
+            // The cover of another volume ("Tome 7" for a "Blacksad 01") stays the series', not the book's.
+            if book.number == nil || first.number == nil || book.number == first.number { match.bookCovers[first.key] = book.coverURL }
+        } else {
+            for item in series.books { match.bookCovers[item.key] = volumes[item.key]?.coverURL }
+        }
+        return match
+    }
+
+    /// What to search a series by. A single book: its file name, which often holds the author
+    /// ("Les Misérables - Victor Hugo.epub"). Several: the series' name and the author they share.
+    static func bookQuery(for series: SeriesMatchInput) -> BookQuery {
+        let books = series.books
+        if books.count == 1, let book = books.first {
+            var query = BookQuery.parse(baseName(of: book))
+            if query.author == nil { query.author = series.authors.first }
+            return query
+        }
+        let authors = books.compactMap { BookQuery.parse(baseName(of: $0)).author }
+        let common = Dictionary(grouping: authors, by: FileNameParser.normalized).values.max { $0.count < $1.count }
+        let shared = common.flatMap { $0.count * 2 >= books.count ? $0.first : nil }
+        return BookQuery(title: seriesTitle(for: series).title, author: series.authors.first ?? shared)
+    }
+
+    /// One volume of a series: its file name, and its number from the library.
+    static func volumeQuery(for book: SeriesMatchInput.Book, series: BookQuery) -> BookQuery {
+        var query = BookQuery.parse(baseName(of: book))
+        if query.author == nil { query.author = series.author }
+        if let number = book.number {
+            if query.number == nil, let last = query.title.split(separator: " ").last, Double(last) == number {
+                // "DRAGON BALL 12": a bare number at the end is the volume's, not the title's.
+                query.title = query.title.split(separator: " ").dropLast().joined(separator: " ")
+            }
+            query.number = number
+            query.hasVolumeMarker = true
+        }
+        return query
+    }
+
+    /// The name of a series for catalogues: "Les Misérables Intégrale/Français" → "Les Misérables".
+    static func seriesTitle(for series: SeriesMatchInput) -> (title: String, fromParentFolder: Bool) {
+        // Folder names on disk are often decomposed ("e" + accent): compose them for the patterns below.
+        var name = (series.customTitle ?? series.folderTitle).precomposedStringWithCanonicalMapping
+        var fromParent = false
+        let languages: Set<String> = ["francais", "french", "fr", "vf", "anglais", "english", "en", "vo", "espagnol",
+                                      "spanish", "allemand", "german", "italien", "italian"]
+        if languages.contains(FileNameParser.normalized(name)), let path = series.folderPath {
+            let parent = ((path as NSString).deletingLastPathComponent as NSString).lastPathComponent
+            if !parent.isEmpty {
+                name = FileNameParser.displayTitle(fromFolderName: parent.precomposedStringWithCanonicalMapping)
+                fromParent = true
+            }
+        }
+        // "Les Misérables Intégrale", "Saga Les Rougon-Macquart", "Astérix - Collection complète".
+        let noise = #"(?i)\b(?:int[ée]grale|saga|collection|compl[eè]te?|coffret|cycle|the complete|box set|tomes?\s*\d+\s*(?:à|a|-|to)\s*\d+)\b"#
+        let cleaned = name.replacingOccurrences(of: noise, with: "", options: .regularExpression)
+            .split(whereSeparator: \.isWhitespace).joined(separator: " ")
+            .trimmingCharacters(in: CharacterSet(charactersIn: " -,:"))
+        return (cleaned.isEmpty ? name : cleaned, fromParent)
+    }
+
+    private static func baseName(of book: SeriesMatchInput.Book) -> String {
+        (book.fileName as NSString).deletingPathExtension
+    }
+}

@@ -1,0 +1,29 @@
+// swift-tools-version: 6.0
+import PackageDescription
+
+let package = Package(
+    name: "cool-reader-server",
+    platforms: [.macOS(.v14)],
+    products: [
+        .executable(name: "cool-reader-server", targets: ["CoolReaderServer"]),
+    ],
+    dependencies: [
+        .package(url: "https://github.com/apple/swift-nio.git", from: "2.65.0"),
+        .package(url: "https://github.com/apple/swift-crypto.git", "3.0.0"..<"5.0.0"),
+    ],
+    targets: [
+        .systemLibrary(name: "CSQLite", pkgConfig: "sqlite3", providers: [.apt(["libsqlite3-dev"])]),
+        // The books, their formats, names and catalogues (Core/), and the server around them (Server/). Core/ only
+        // uses Foundation and never Server/: it becomes the package the app shares once the app adopts it.
+        .target(name: "CoolReaderKit", dependencies: [
+            "CSQLite",
+            .product(name: "NIOCore", package: "swift-nio"),
+            .product(name: "NIOPosix", package: "swift-nio"),
+            .product(name: "NIOHTTP1", package: "swift-nio"),
+            .product(name: "NIOFoundationCompat", package: "swift-nio"),
+            .product(name: "Crypto", package: "swift-crypto"),
+        ]),
+        .executableTarget(name: "CoolReaderServer", dependencies: ["CoolReaderKit"]),
+        .testTarget(name: "CoolReaderKitTests", dependencies: ["CoolReaderKit"]),
+    ]
+)

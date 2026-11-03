@@ -1,0 +1,8 @@
+.DS_Store
+.build/
+.swiftpm/
+/config/
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+setup-code.txt
