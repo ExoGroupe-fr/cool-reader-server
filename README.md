@@ -31,8 +31,9 @@ machine and only reach the devices you pair.
   public address in invitations; a free DuckDNS name follows an address that changes. A VPN such as Tailscale
   works too, and is never required.
 - **Bonjour**: Cool Reader finds the server on the home network by itself.
-- **In the browser**, in the spirit of Plex: what you're reading, what's new, each library's series, search, and a
-  reader for comics, manga and PDFs that turns manga right to left and keeps your page in step with Cool Reader.
+- **In the browser**, in the spirit of Plex: a sidebar that goes from one library to the next, a home page that opens
+  on what you're reading and shows each library with its covers, what's new, search, and a reader for comics, manga
+  and PDFs that turns manga right to left and keeps your page in step with Cool Reader.
 - **OPDS 1.2** with page streaming: Panels, Chunky, KOReader or any OPDS reader can browse, download and read
   page by page.
 
@@ -42,8 +43,9 @@ machine and only reach the devices you pair.
 
 Like Plex Media Server, a menu bar app runs the server on a Mac (macOS 14 or later). Download
 **Cool Reader Server.app** from the [releases](https://github.com/ExoGroupe-fr/cool-reader-server/releases), put it in
-Applications and open it: books appear in the menu bar. It shows the setup code at the first start, the libraries
-and the address to give your devices, and opens the admin pages. « Ajouter un dossier… » (or a folder dropped on
+Applications and open it: books appear in the menu bar, and the app in the Dock, where a click opens the site
+(« Afficher dans le Dock » takes it out). The menu shows the setup code at the first start, the libraries and the
+address to give your devices, and opens the admin pages. « Ajouter un dossier… » (or a folder dropped on
 the app's icon) adds a library, and « Ouvrir au démarrage du Mac » keeps it running. Data goes in
 `~/Library/Application Support/Cool Reader Server`, the log in `~/Library/Logs/Cool Reader Server.log`.
 
@@ -168,7 +170,7 @@ Cool Reader Server est un petit serveur maison façon Plex pour les mangas, BD, 
 des dossiers, il reconnaît les séries, trouve affiches et résumés, et chaque membre lit les bibliothèques
 qu'on lui ouvre, dans Cool Reader, un lecteur OPDS ou un navigateur. On invite quelqu'un avec un code QR ou un
 lien, et on lit aussi hors de chez soi : le serveur ouvre lui-même le port de la box, en HTTPS. Gratuit, open
-source, sans compte ni relais : vos livres restent chez vous. Sur Mac, une appli de barre des menus ; ailleurs,
+source, sans compte ni relais : vos livres restent chez vous. Sur Mac, une appli dans le Dock et la barre des menus ; ailleurs,
 Docker.
 
 ## License
