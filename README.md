@@ -95,6 +95,8 @@ anywhere, over HTTPS.
 - **Your provider shares one address between customers** (CGNAT, common on 4G/5G boxes and some fibre offers):
   nothing can reach you directly. Ask your provider for a dedicated IPv4 address (often free), or use a VPN such
   as Tailscale on the server and your devices.
+- **OPDS readers away from home** must use `https://`, and most refuse a certificate no authority signed. Use a
+  VPN for them, or put the server behind a reverse proxy with a real certificate (Caddy, Traefik, Synology's).
 
 ## Settings
 
