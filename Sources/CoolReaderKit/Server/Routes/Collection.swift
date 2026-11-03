@@ -15,8 +15,8 @@ nonisolated enum CollectionRoutes {
             if await context.setup.isNeeded { return .redirect("/setup") }
             guard let caller = await context.caller(request) else { return .redirect("/login") }
             let strings = Strings(request.language)
-            var page = WebPage(title: context.serverName, strings: strings, caller: caller, section: "/")
             let libraries = context.store.visibleLibraries(for: caller.user)
+            var page = WebPage(title: context.serverName, strings: strings, caller: caller, libraries: libraries, section: "/")
             let finished = context.store.finishedCounts(userID: caller.user.id)
             if caller.user.isAdmin {
                 let scanning = await context.scanner.isScanning
@@ -30,21 +30,32 @@ nonisolated enum CollectionRoutes {
                 if caller.user.isAdmin { page.add("<p><a class=\"button\" href=\"/libraries\">\(h(strings["addLibrary"]))</a></p>") }
             }
             let reading = context.store.readingNow(userID: caller.user.id, libraryIDs: libraries.map(\.id), limit: 20)
+            let recent = context.store.recentSeries(libraryIDs: libraries.map(\.id), limit: 20)
+            // The page opens on the series being read, else on a new one, with a banner if one of the newest has one.
+            let hasBanner = { (series: SeriesRecord) in series.bannerPath != nil || series.match?.bannerURL != nil }
+            let featured: (series: SeriesRecord, label: String)? =
+                reading.lazy.compactMap { context.store.series(id: $0.book.seriesID) }.first.map { ($0, strings["continueReading"]) }
+                ?? (recent.prefix(10).first(where: hasBanner) ?? recent.first).map { ($0, strings["justAdded"]) }
+            if let featured {
+                page.add(hero(featured.series, books: context.store.books(seriesID: featured.series.id),
+                              progress: context.store.progress(userID: caller.user.id, seriesID: featured.series.id), strings: strings,
+                              overline: featured.label))
+            }
+            let shelves = libraries.map { (library: $0, series: context.store.series(libraryID: $0.id)) }
+            if !shelves.isEmpty { page.add(libraryTiles(shelves, strings: strings)) }
             let readingCards = reading.compactMap { item -> String? in
                 guard let series = context.store.series(id: item.book.seriesID) else { return nil }
                 return bookCard(item.book, series: series, progress: item.progress, strings: strings, showSeries: true)
             }
             if !readingCards.isEmpty { page.add(shelf(strings["continueReading"], cards: readingCards, strings: strings)) }
-            let recent = context.store.recentSeries(libraryIDs: libraries.map(\.id), limit: 20)
             if libraries.count > 1, !recent.isEmpty {
                 page.add(shelf(strings["recent"], cards: recent.map { seriesCard($0, finished: finished[$0.id] ?? 0, strings: strings) },
                                strings: strings))
             }
-            for library in libraries {
-                let series = context.store.series(libraryID: library.id)
+            for (library, series) in shelves {
                 let cards = series.prefix(24).map { seriesCard($0, finished: finished[$0.id] ?? 0, strings: strings) }
                 page.add(shelf(library.name, detail: strings.seriesCount(library.seriesCount), link: "/library/\(library.id)",
-                               cards: Array(cards), empty: strings["noSeries"], strings: strings))
+                               icon: Icon.library(named: library.name), cards: Array(cards), empty: strings["noSeries"], strings: strings))
             }
             page.add("<p class=\"hint\">\(h(strings["opdsHint"])) <code>\(h(AdminRoutes.host(request)))/opds</code> \(h(strings["opdsHint2"]))</p>")
             return .html(page.html)
@@ -55,13 +66,19 @@ nonisolated enum CollectionRoutes {
             let library = try context.visibleLibrary(request.parameter("id"), for: caller)
             let strings = Strings(request.language)
             let byDate = request.query["sort"] == "recent"
-            var page = WebPage(title: library.name, strings: strings, caller: caller, section: "/library/\(library.id)")
-            page.add("""
-                <div class="heading"><h1>\(h(library.name)) <small>\(h(strings.seriesCount(library.seriesCount)))</small></h1>
-                <p class="sort"><a href="/library/\(library.id)"\(byDate ? "" : " aria-current=\"true\"")>\(h(strings["sortTitle"]))</a>
-                <a href="/library/\(library.id)?sort=recent"\(byDate ? " aria-current=\"true\"" : "")>\(h(strings["recent"]))</a></p></div>
-                """)
+            var page = WebPage(title: library.name, strings: strings, caller: caller, libraries: context.store.visibleLibraries(for: caller.user), section: "/library/\(library.id)")
             var series = context.store.series(libraryID: library.id)
+            // The newest covers, in a slanted row behind the library's name.
+            let newest = series.sorted { $0.addedAt > $1.addedAt }.prefix(10).map(\.id)
+            let mosaic = newest.isEmpty ? "" : "<div class=\"mosaic\" aria-hidden=\"true\">"
+                + (0..<max(10, newest.count)).map { "<img src=\"/api/v1/series/\(newest[$0 % newest.count])/cover\" alt=\"\">" }.joined() + "</div>"
+            let counts = [strings.seriesCount(library.seriesCount), strings.bookCount(library.bookCount, kind: .book)].joined(separator: " · ")
+            page.add("""
+                <section class="library-head">\(mosaic)<div class="library-title">\(Icon.library(named: library.name))\
+                <div><h1>\(h(library.name))</h1><p class="facts">\(h(counts))</p></div></div>
+                <p class="sort"><a href="/library/\(library.id)"\(byDate ? "" : " aria-current=\"true\"")>\(h(strings["sortTitle"]))</a>
+                <a href="/library/\(library.id)?sort=recent"\(byDate ? " aria-current=\"true\"" : "")>\(h(strings["recent"]))</a></p></section>
+                """)
             if byDate { series.sort { $0.addedAt > $1.addedAt } }
             let finished = context.store.finishedCounts(userID: caller.user.id)
             page.add(series.isEmpty ? "<p class=\"empty\">\(h(strings["noSeries"]))</p>"
@@ -73,7 +90,7 @@ nonisolated enum CollectionRoutes {
             guard let caller = await context.caller(request) else { return .redirect("/login") }
             let strings = Strings(request.language)
             let text = (request.query["q"] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-            var page = WebPage(title: strings["search"], strings: strings, caller: caller, search: text)
+            var page = WebPage(title: strings["search"], strings: strings, caller: caller, libraries: context.store.visibleLibraries(for: caller.user), search: text)
             page.add("<h1>\(h(text.isEmpty ? strings["search"] : strings.searchTitle(text)))</h1>")
             let results = context.store.searchSeries(text, libraryIDs: context.visibleLibraryIDs(for: caller))
             let finished = context.store.finishedCounts(userID: caller.user.id)
@@ -90,7 +107,7 @@ nonisolated enum CollectionRoutes {
             let strings = Strings(request.language)
             let books = context.store.books(seriesID: series.id)
             let progress = context.store.progress(userID: caller.user.id, seriesID: series.id)
-            var page = WebPage(title: series.title, strings: strings, caller: caller, section: "/library/\(series.libraryID)")
+            var page = WebPage(title: series.title, strings: strings, caller: caller, libraries: context.store.visibleLibraries(for: caller.user), section: "/library/\(series.libraryID)")
             page.add(hero(series, books: books, progress: progress, strings: strings))
             let cards = books.map { book in
                 bookCard(book, series: series, progress: progress[book.id], strings: strings, showSeries: false, actions: true)
@@ -153,12 +170,29 @@ nonisolated enum CollectionRoutes {
         return min(Double(progress.page) / Double(count - 1), 1)
     }
 
-    static func shelf(_ title: String, detail: String? = nil, link: String? = nil, cards: [String], empty: String? = nil,
+    static func shelf(_ title: String, detail: String? = nil, link: String? = nil, icon: String = "", cards: [String], empty: String? = nil,
                       strings: Strings) -> String {
-        let heading = link.map { "<a href=\"\($0)\">\(h(title))</a>" } ?? h(title)
+        let heading = link.map { "<a href=\"\($0)\">\(icon)\(h(title))</a>" } ?? icon + h(title)
         let more = link.map { "<a class=\"more\" href=\"\($0)\">\(h(strings["seeAll"])) ›</a>" } ?? ""
         let body = cards.isEmpty ? "<p class=\"empty\">\(h(empty ?? ""))</p>" : "<div class=\"shelf\">\(cards.joined())</div>"
         return "<section class=\"row-section\"><div class=\"row-head\"><h2>\(heading)\(detail.map { " <small>\(h($0))</small>" } ?? "")</h2>\(more)</div>\(body)</section>"
+    }
+
+    /// The libraries as tiles, each with its newest covers fanned out over their own colours.
+    static func libraryTiles(_ shelves: [(library: LibraryRecord, series: [SeriesRecord])], strings: Strings) -> String {
+        let tiles = shelves.map { shelf -> String in
+            let icon = Icon.library(named: shelf.library.name)
+            let covers = shelf.series.sorted { $0.addedAt > $1.addedAt }.prefix(3)
+            let art = covers.isEmpty ? "<span class=\"tile-empty\">\(icon)</span>"
+                : covers.map { "<img src=\"/api/v1/series/\($0.id)/cover\" alt=\"\" loading=\"lazy\">" }.joined()
+            let backdrop = covers.first.map { "<span class=\"tile-backdrop\" style=\"background-image: url('/api/v1/series/\($0.id)/cover')\"></span>" } ?? ""
+            let counts = [strings.seriesCount(shelf.library.seriesCount), strings.bookCount(shelf.library.bookCount, kind: .book)]
+            return """
+                <a class="tile" href="/library/\(shelf.library.id)">\(backdrop)<span class="tile-art">\(art)</span>\
+                <span class="tile-text">\(icon)<strong>\(h(shelf.library.name))</strong><span class="sub">\(h(counts.joined(separator: " · ")))</span></span></a>
+                """
+        }
+        return "<section class=\"row-section\"><div class=\"row-head\"><h2>\(h(strings["yourLibraries"]))</h2></div><div class=\"tiles\">\(tiles.joined())</div></section>"
     }
 
     static func grid(_ cards: [String], wide: Bool = false) -> String {
@@ -214,8 +248,10 @@ nonisolated enum CollectionRoutes {
             """
     }
 
-    /// The top of a series' page: its banner (or its poster, blurred), poster, facts and the button that reads on.
-    static func hero(_ series: SeriesRecord, books: [BookRecord], progress: [Int: ProgressRecord], strings: Strings) -> String {
+    /// The top of a series' page: its banner (or its poster, blurred), poster, facts and the button that reads on. With
+    /// a line above the title, the home page opens on it, with a way to the series.
+    static func hero(_ series: SeriesRecord, books: [BookRecord], progress: [Int: ProgressRecord], strings: Strings,
+                     overline: String? = nil) -> String {
         let hasBanner = series.bannerPath != nil || series.match?.bannerURL != nil
         let backdrop = hasBanner ? "/api/v1/series/\(series.id)/banner" : "/api/v1/series/\(series.id)/cover"
         let facts = [series.authors.joined(separator: ", "), series.year.map(String.init), series.status.map { strings[$0] },
@@ -227,17 +263,20 @@ nonisolated enum CollectionRoutes {
             let started = (progress[next.id]?.page ?? 0) > 0
             let label = started ? strings["resume"] : strings["read"]
             let name = readable.count > 1 ? " · \(strings.bookTitle(next, kind: series.kind))" : ""
-            action = "<a class=\"button play\" href=\"/read/\(next.id)\">▶ \(h(label + name))</a>"
+            action = "<a class=\"button play\" href=\"/read/\(next.id)\">\(Icon.play)\(h(label + name))</a>"
         } else if let first = readable.first {
-            action = "<a class=\"button play\" href=\"/read/\(first.id)?page=0\">▶ \(h(strings["readAgain"]))</a>"
+            action = "<a class=\"button play\" href=\"/read/\(first.id)?page=0\">\(Icon.play)\(h(strings["readAgain"]))</a>"
         }
+        let spotlight = overline != nil
+        if spotlight { action += "<a class=\"button glass\" href=\"/series/\(series.id)\">\(h(strings["seeSeries"]))</a>" }
+        let title = spotlight ? "<a href=\"/series/\(series.id)\">\(h(series.title))</a>" : h(series.title)
         return """
-            <section class="hero\(hasBanner ? " banner" : "")"><div class="backdrop" style="background-image: url('\(backdrop)')"></div>
+            <section class="hero\(hasBanner ? " banner" : "")\(spotlight ? " spotlight" : "")"><div class="backdrop" style="background-image: url('\(backdrop)')"></div>
             <div class="hero-body"><img class="poster" src="/api/v1/series/\(series.id)/cover" alt="">
-            <div class="info"><h1>\(h(series.title))</h1><p class="facts">\(h(facts.joined(separator: " · ")))</p>
+            <div class="info">\(overline.map { "<p class=\"overline\">\(h($0))</p>" } ?? "")<h1>\(title)</h1><p class="facts">\(h(facts.joined(separator: " · ")))</p>
             \(genres.isEmpty ? "" : "<p class=\"chips\">\(genres)</p>")\(action.isEmpty ? "" : "<p class=\"actions\">\(action)</p>")
             \(series.summary.map { "<p class=\"summary\">\(h($0))</p>" } ?? "")
-            \(series.matchStatus == "unmatched" ? "<p class=\"hint\">\(h(strings["unmatched"]))</p>" : "")
+            \(series.matchStatus == "unmatched" && !spotlight ? "<p class=\"hint\">\(h(strings["unmatched"]))</p>" : "")
             </div></div></section>
             """
     }
