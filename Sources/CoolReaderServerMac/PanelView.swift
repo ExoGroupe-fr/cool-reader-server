@@ -3,6 +3,10 @@ import CoolReaderKit
 import ServiceManagement
 import SwiftUI
 
+/// SwiftUI's `@State` property wrapper, by a name of its own: the macOS 27 SDK makes `@State` a macro whose plugin
+/// only comes with Xcode, and the app builds with the command line tools too.
+private typealias ViewState = SwiftUI.State
+
 /// The menu bar panel: the server's state, the setup code until the admin account exists, the libraries, the
 /// address devices reach it at, and what to do.
 struct PanelView: View {
@@ -200,7 +204,7 @@ private struct LibrarySummary: View {
 /// The address to give devices at home, and a button that copies it.
 private struct AddressRow: View {
     let address: String
-    @State private var copied = false
+    @ViewState private var copied = false
 
     var body: some View {
         HStack(spacing: 8) {
@@ -309,7 +313,7 @@ private struct MenuRowStyle: ButtonStyle {
     private struct Row: View {
         let configuration: Configuration
         @Environment(\.isEnabled) private var isEnabled
-        @State private var isHovered = false
+        @ViewState private var isHovered = false
 
         var body: some View {
             configuration.label

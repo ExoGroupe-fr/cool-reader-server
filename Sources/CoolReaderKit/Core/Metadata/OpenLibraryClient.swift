@@ -39,7 +39,7 @@ nonisolated enum OpenLibraryClient {
             let genres = Self.genres(doc["subject"] as? [String] ?? [])
             let languages = (doc["language"] as? [String] ?? []).compactMap(languageCode)
             matches.append(BookMatch(source: .openLibrary, id: "ol:\(key)", title: title, subtitle: doc["subtitle"] as? String,
-                                     authors: authors, year: year, language: languages.count == 1 ? languages[0] : nil,
+                                     authors: authors, year: year, releaseDate: nil, language: languages.count == 1 ? languages[0] : nil,
                                      summary: nil, genres: genres, coverURL: (doc["cover_i"] as? Int).map(coverURL)))
             let edition = ((doc["editions"] as? [String: Any])?["docs"] as? [[String: Any]])?.first
             if let edition, let editionKey = edition["key"] as? String, let editionTitle = (edition["title"] as? String).map(sentenceCased),
@@ -47,7 +47,7 @@ nonisolated enum OpenLibraryClient {
                 let language = (edition["language"] as? [String])?.first.flatMap(languageCode)
                 let cover = (edition["cover_i"] as? Int ?? doc["cover_i"] as? Int).map(coverURL)
                 matches.append(BookMatch(source: .openLibrary, id: "ol:\(editionKey)", title: editionTitle, subtitle: nil,
-                                         authors: authors, year: year, language: language, summary: nil, genres: genres,
+                                         authors: authors, year: year, releaseDate: nil, language: language, summary: nil, genres: genres,
                                          coverURL: cover))
             }
         }
@@ -60,7 +60,7 @@ nonisolated enum OpenLibraryClient {
         guard let title = (json["title"] as? String).map(sentenceCased) else { return nil }
         return BookMatch(source: .openLibrary, id: "ol:\(key)", title: title, subtitle: json["subtitle"] as? String,
                          authors: [], year: (json["first_publish_date"] as? String).flatMap { Int($0.suffix(4)) },
-                         language: nil, summary: try await summary(of: json),
+                         releaseDate: nil, language: nil, summary: try await summary(of: json),
                          genres: genres(json["subjects"] as? [String] ?? []),
                          coverURL: (json["covers"] as? [Int])?.first { $0 > 0 }.map(coverURL))
     }

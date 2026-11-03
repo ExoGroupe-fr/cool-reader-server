@@ -15,6 +15,9 @@ nonisolated struct BookMatch: Sendable, Identifiable, Hashable {
     let subtitle: String?
     let authors: [String]
     let year: Int?
+    /// "2020-08-20T07:00:00Z" when the store gives it: of the editions sold under one title, the first one out opens
+    /// the series.
+    let releaseDate: String?
     /// "fr", "en"… when known.
     let language: String?
     let summary: String?
@@ -224,7 +227,12 @@ nonisolated struct BookQuery: Equatable, Sendable {
             let core = word.trimmingCharacters(in: CharacterSet(charactersIn: ".,"))
             letters += core.filter(\.isLetter).count
             let lowered = core.lowercased()
-            if particles.contains(lowered) || lowered.hasPrefix("d'") || lowered.hasPrefix("d’") { continue }
+            if particles.contains(lowered) { continue }
+            if lowered.hasPrefix("d'") || lowered.hasPrefix("d’") {
+                // "d'Ormesson" is a particle before a name; "d'envol" ("Potion d'envol") is a title's.
+                guard core.dropFirst(2).first?.isUppercase == true else { return false }
+                continue
+            }
             if core.count <= 3, core.allSatisfy({ $0.isUppercase || $0 == "." }) { continue }  // initials: "J.", "J.K"
             guard let initial = core.first, initial.isUppercase, !core.contains(where: \.isNumber) else { return false }
         }
@@ -331,11 +339,31 @@ nonisolated enum BookMatcher {
         matches.map { ($0, score($0, for: query, language: language).rank) }.sorted { $0.1 > $1.1 }.map(\.0)
     }
 
-    /// The best result, if it is good enough to apply without asking.
+    /// The best result, if it is good enough to apply without asking. For a series, a tie goes to the edition out
+    /// first: a store may sell the parts of a series under one title ("Pepper&Carrot" three times, episodes 1 to
+    /// 10, 11 to 20, 21 to 30), and its order says nothing of which comes first.
     static func best(_ matches: [BookMatch], for query: BookQuery, language: String, series: Bool = false) -> BookMatch? {
-        matches.map { ($0, score($0, for: query, language: language, series: series)) }
-            .filter { $0.1.isStrong }
-            .max { $0.1.rank < $1.1.rank }?.0
+        let strong = matches.map { ($0, score($0, for: query, language: language, series: series)) }.filter { $0.1.isStrong }
+        guard let top = strong.max(by: { $0.1.rank < $1.1.rank }) else { return nil }
+        guard series else { return top.0 }
+        let tied = strong.filter { $0.1.rank >= top.1.rank - 0.001 }.compactMap { match, _ in match.releaseDate.map { (match, $0) } }
+        return tied.min { $0.1 < $1.1 }?.0 ?? top.0
+    }
+
+    /// A catalogue book found for volumes of different numbers or titles stands for none of them: an edition of the
+    /// whole series that matched by its name ("Pepper&Carrot" for episodes 2 to 6). The same volume twice, a CBZ
+    /// and a PDF, keeps it.
+    static func withoutSharedBooks(_ found: [String: BookMatch], volumes: [(key: String, query: BookQuery)]) -> [String: BookMatch] {
+        let identity = Dictionary(volumes.map { volume in
+            (volume.key, "\(volume.query.number.map { "\($0)" } ?? "-") \(FileNameParser.normalized(volume.query.title))")
+        }, uniquingKeysWith: { first, _ in first })
+        var kept = found
+        for keys in Dictionary(grouping: found.keys, by: { found[$0]!.id }).values where keys.count > 1 {
+            if Set(keys.map { identity[$0] ?? $0 }).count > 1 {
+                for key in keys { kept[key] = nil }
+            }
+        }
+        return kept
     }
 
     /// The volumes of a series among catalogue results, by the caller's keys: each by its own title when its file

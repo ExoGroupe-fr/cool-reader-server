@@ -183,18 +183,20 @@ nonisolated enum SeriesMatcher {
             return nil
         }
         // A series of several books: one search for the series, each volume found in it by its own title or number,
-        // then a search for each volume with a title of its own that the first one missed.
+        // then a search for each volume with a title of its own that the first one missed. Chapters and episodes
+        // aren't sold one by one, and their numbers aren't the books': the series alone is looked up.
         var seriesQuery = query
         seriesQuery.number = 1
+        let byVolume = series.kind != .chapter
         for search in searches {
             let pool = search.source == .appleBooks
                 ? try await AppleBooksClient.search(search.term ?? query.searchText, limit: 50)
                 : try await OpenLibraryClient.search(title: query.searchTitle, author: query.author, limit: 30)
-            let volumes = try await volumeMatches(for: series, pool: pool, searchesMissing: false)
+            let volumes = byVolume ? try await volumeMatches(for: series, pool: pool, searchesMissing: false) : [:]
             // The series takes its first volume's book, or a result naming the series itself.
             guard let lead = books.lazy.compactMap({ volumes[$0.key] }).first
                     ?? BookMatcher.best(pool, for: seriesQuery, language: language, series: true) else { continue }
-            let complete = search.source == .appleBooks ? try await volumeMatches(for: series, pool: pool) : volumes
+            let complete = byVolume && search.source == .appleBooks ? try await volumeMatches(for: series, pool: pool) : volumes
             return await applyBook(lead, to: series, volumes: complete)
         }
         return nil
@@ -206,14 +208,15 @@ nonisolated enum SeriesMatcher {
         guard series.books.count > 1 else { return [:] }
         let query = bookQuery(for: series)
         let volumes = series.books.map { (key: $0.key, query: volumeQuery(for: $0, series: query)) }
-        var found = BookMatcher.volumes(volumes, in: pool, series: query, language: MetadataLocale.language)
+        var found = BookMatcher.withoutSharedBooks(
+            BookMatcher.volumes(volumes, in: pool, series: query, language: MetadataLocale.language), volumes: volumes)
         guard searchesMissing else { return found }
         let missing = volumes.filter { found[$0.key] == nil && TitleMatcher.similarity($0.query.title, query.title) < 0.9 }
         for volume in missing.prefix(12) {
             let results = try await AppleBooksClient.search(volume.query.searchText, limit: 10)
             found[volume.key] = BookMatcher.best(results, for: volume.query, language: MetadataLocale.language)
         }
-        return found
+        return BookMatcher.withoutSharedBooks(found, volumes: volumes)
     }
 
     private static func applyBook(_ book: BookMatch, to series: SeriesMatchInput, volumes: [String: BookMatch] = [:]) async -> SeriesMatch {
@@ -248,8 +251,11 @@ nonisolated enum SeriesMatcher {
         match.year = book.year
         match.coverURL = book.coverURL
         if series.books.count == 1, let first = series.books.first {
-            // The cover of another volume ("Tome 7" for a "Blacksad 01") stays the series', not the book's.
-            if book.number == nil || first.number == nil || book.number == first.number { match.bookCovers[first.key] = book.coverURL }
+            // The cover of another volume ("Tome 7" for a "Blacksad 01") stays the series', not the book's; so does an
+            // edition's for a chapter, which keeps the cover of its own pages.
+            if series.kind != .chapter, book.number == nil || first.number == nil || book.number == first.number {
+                match.bookCovers[first.key] = book.coverURL
+            }
         } else {
             for item in series.books { match.bookCovers[item.key] = volumes[item.key]?.coverURL }
         }
