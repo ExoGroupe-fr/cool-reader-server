@@ -53,6 +53,7 @@ nonisolated enum AppleBooksClient {
             return BookMatch(source: .appleBooks, id: "ab:\(id)", title: title, subtitle: nil,
                              authors: authors(item["artistName"] as? String),
                              year: (item["releaseDate"] as? String).flatMap { Int($0.prefix(4)) },
+                             releaseDate: item["releaseDate"] as? String,
                              language: language(of: [title, summary ?? ""].joined(separator: ". ")),
                              summary: summary?.isEmpty == false ? summary : nil,
                              genres: Array(genres.prefix(3)),
