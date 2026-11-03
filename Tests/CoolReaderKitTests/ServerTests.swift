@@ -114,6 +114,79 @@ struct ServerTests {
         #expect(store.library(id: mangaID)?.lastError == "unreachable")
     }
 
+    /// The pages in the browser: what a member reads shows on the home page, the reader turns manga right to left,
+    /// and a book marked read sends the series' button on to the next one.
+    @Test func readsInTheBrowser() async throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let mangas = folder.appendingPathComponent("Mangas")
+        try FileManager.default.createDirectory(at: mangas.appendingPathComponent("Akira"), withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: folder.appendingPathComponent("config"), withIntermediateDirectories: true)
+        for volume in 1...2 {
+            let pages = (1...3).map { (page: Int) -> TestZip.File in TestZip.File(name: "\(page).jpg", data: Data([UInt8(page)])) }
+            try TestZip.make(pages).write(to: mangas.appendingPathComponent("Akira/Akira 0\(volume).cbz"))
+        }
+        var config = ServerConfig(configDirectory: folder.appendingPathComponent("config"))
+        config.onlineMetadata = false
+        let store = try Store(path: folder.appendingPathComponent("config/library.sqlite").path)
+        let library = try store.addLibrary(name: "Mangas", path: mangas.path)
+        let reader = try #require(store.user(id: try store.createUser(name: "Lea", passwordHash: "", isAdmin: false, allLibraries: true,
+                                                                      libraryIDs: [])))
+        let context = try ServerContext(config: config, store: store)
+        await context.scanner.scanNow(library)
+        var router = Router()
+        APIRoutes.add(to: &router, context: context)
+        CollectionRoutes.add(to: &router, context: context)
+        let token = try context.issueToken(for: reader, deviceName: "Test", kind: "web")
+        let series = try #require(store.series(libraryID: library).first)
+        let books = store.books(seriesID: series.id)
+        #expect(books.count == 2)
+
+        let page = String(decoding: Self.body(await router.handle(Self.request("/read/\(books[0].id)", token: token))), as: UTF8.self)
+        #expect(page.contains("data-count=\"3\"") && page.contains("data-rtl=\"1\"") && page.contains("data-start=\"0\""))
+
+        // A page past the end stays on the last one, and the home page offers to carry on.
+        let saved = await router.handle(Self.request("/api/v1/books/\(books[0].id)/progress", method: .PUT, token: token, body: #"{"page": 9}"#))
+        #expect(try Self.decode(APIRoutes.ProgressInfo.self, saved).page == 2)
+        _ = await router.handle(Self.request("/api/v1/books/\(books[0].id)/progress", method: .PUT, token: token, body: #"{"page": 1}"#))
+        let home = String(decoding: Self.body(await router.handle(Self.request("/", token: token))), as: UTF8.self)
+        #expect(home.contains("/read/\(books[0].id)"))
+        let resumed = String(decoding: Self.body(await router.handle(Self.request("/read/\(books[0].id)", token: token))), as: UTF8.self)
+        #expect(resumed.contains("data-start=\"1\""))
+
+        var marked = Self.request("/books/\(books[0].id)/read", method: .POST, token: token, body: "read=1")
+        marked.headers.add(name: "Content-Type", value: "application/x-www-form-urlencoded")
+        #expect(await router.handle(marked).status == .seeOther)
+        #expect(store.progress(userID: reader.id, bookID: books[0].id)?.finished == true)
+        let detail = String(decoding: Self.body(await router.handle(Self.request("/series/\(series.id)", token: token))), as: UTF8.self)
+        #expect(detail.contains("href=\"/read/\(books[1].id)\""))
+    }
+
+    @Test func turnsMangaRightToLeft() throws {
+        func book(rightToLeft: Bool?) -> BookRecord {
+            var metadata = EmbeddedMetadata()
+            metadata.isRightToLeft = rightToLeft
+            return BookRecord(id: 1, seriesID: 1, libraryID: 1, path: "a.cbz", fileName: "a.cbz", format: .cbz, fileSize: 1, modifiedAt: nil,
+                              number: 1, extraTitle: nil, plainName: "a", position: 0, pageCount: 3, coverPath: nil, pagePaths: ["1.jpg"],
+                              isText: false, metadata: metadata, analysisError: nil, addedAt: Date())
+        }
+        func series(language: String?, folder: String) -> SeriesRecord {
+            var match: SeriesMatch?
+            if let language {
+                match = SeriesMatch(source: .anilist)
+                match?.originalLanguage = language
+            }
+            return SeriesRecord(id: 1, libraryID: 1, key: "k", folderTitle: "A", folderPath: folder, kind: .volume, posterPath: nil,
+                                bannerPath: nil, nfo: nil, matchStatus: "matched", match: match, addedAt: Date(), bookCount: 1)
+        }
+        let comics = LibraryRecord(id: 1, name: "BD", path: "/BD", lastScanAt: nil, lastError: nil, seriesCount: 1, bookCount: 1)
+        #expect(CollectionRoutes.isRightToLeft(book(rightToLeft: nil), series: series(language: "ja", folder: "A"), library: comics))
+        #expect(!CollectionRoutes.isRightToLeft(book(rightToLeft: nil), series: series(language: "ko", folder: "Manga/A"), library: comics))
+        #expect(!CollectionRoutes.isRightToLeft(book(rightToLeft: false), series: series(language: "ja", folder: "A"), library: comics))
+        #expect(CollectionRoutes.isRightToLeft(book(rightToLeft: nil), series: series(language: nil, folder: "Mangas/A"), library: comics))
+        #expect(!CollectionRoutes.isRightToLeft(book(rightToLeft: nil), series: series(language: nil, folder: "A"), library: comics))
+    }
+
     static func request(_ path: String, method: HTTPMethod = .GET, token: String? = nil, basic: String? = nil, body: String = "") -> Request {
         var headers = HTTPHeaders()
         if let token { headers.add(name: "Authorization", value: "Bearer \(token)") }

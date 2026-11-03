@@ -142,7 +142,7 @@ nonisolated enum InvitationRoutes {
         } else {
             page.add("<p class=\"hint\">\(h(strings["inviteAddresses"])) " + addresses.map { "<code>\(h($0))</code>" }.joined(separator: " · ") + "</p>")
         }
-        page.add("<script src=\"/admin.js\"></script>")
+        page.add("<script src=\"/admin.js?v=\(WebPage.version(of: script))\"></script>")
         return .html(page.html)
     }
 

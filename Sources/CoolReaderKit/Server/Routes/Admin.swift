@@ -1,3 +1,4 @@
+import Crypto
 import Foundation
 import NIOHTTP1
 
@@ -56,80 +57,6 @@ nonisolated enum AdminRoutes {
             var response = Response.redirect("/login")
             response.headers.add(name: "Set-Cookie", value: "\(ServerContext.sessionCookie)=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0")
             return response
-        }
-
-        // MARK: Reading
-
-        router.add(.GET, "/") { request in
-            if await context.setup.isNeeded { return .redirect("/setup") }
-            guard let caller = await context.caller(request) else { return .redirect("/login") }
-            let strings = Strings(request.language)
-            var page = WebPage(title: context.serverName, strings: strings, caller: caller)
-            let libraries = context.store.visibleLibraries(for: caller.user)
-            if caller.user.isAdmin {
-                let scanning = await context.scanner.isScanning
-                let pending = context.store.pendingSeries(limit: 1000).count
-                let status = [scanning ? strings["scanning"] : nil, pending > 0 && context.config.onlineMetadata ? strings["matching"] : nil]
-                    .compactMap { $0 }
-                if !status.isEmpty { page.add("<p class=\"status\">\(h(status.joined(separator: " · ")))</p>") }
-            }
-            if libraries.isEmpty {
-                page.add("<p class=\"empty\">\(h(strings["noLibraries"]))</p>")
-                if caller.user.isAdmin { page.add("<p><a class=\"button\" href=\"/libraries\">\(h(strings["addLibrary"]))</a></p>") }
-            }
-            for library in libraries {
-                let series = Array(context.store.series(libraryID: library.id).prefix(12))
-                page.add("<section><h2><a href=\"/library/\(library.id)\">\(h(library.name))</a> <small>\(h(strings.seriesCount(library.seriesCount)))</small></h2>")
-                page.add(series.isEmpty ? "<p class=\"empty\">\(h(strings["noSeries"]))</p>" : grid(series, strings: strings))
-                page.add("</section>")
-            }
-            let recent = context.store.recentSeries(libraryIDs: libraries.map(\.id), limit: 12)
-            if !recent.isEmpty, libraries.count > 1 {
-                page.add("<section><h2>\(h(strings["recent"]))</h2>\(grid(recent, strings: strings))</section>")
-            }
-            page.add("<p class=\"hint\">\(h(strings["opdsHint"])) <code>\(h(host(request)))/opds</code> \(h(strings["opdsHint2"]))</p>")
-            return .html(page.html)
-        }
-
-        router.add(.GET, "/library/:id") { request in
-            guard let caller = await context.caller(request) else { return .redirect("/login") }
-            let library = try context.visibleLibrary(request.parameter("id"), for: caller)
-            let strings = Strings(request.language)
-            var page = WebPage(title: library.name, strings: strings, caller: caller)
-            page.add("<h1>\(h(library.name)) <small>\(h(strings.seriesCount(library.seriesCount)))</small></h1>")
-            let series = context.store.series(libraryID: library.id)
-            page.add(series.isEmpty ? "<p class=\"empty\">\(h(strings["noSeries"]))</p>" : grid(series, strings: strings))
-            return .html(page.html)
-        }
-
-        router.add(.GET, "/series/:id") { request in
-            guard let caller = await context.caller(request) else { return .redirect("/login") }
-            let (series, _) = try context.visibleSeries(request.parameter("id"), for: caller)
-            let strings = Strings(request.language)
-            var page = WebPage(title: series.title, strings: strings, caller: caller)
-            let facts = [series.authors.joined(separator: ", "), series.year.map(String.init), series.status.map { strings[$0] },
-                         strings.bookCount(series.bookCount, kind: series.kind)]
-                .compactMap { $0 }.filter { !$0.isEmpty }
-            page.add("""
-                <div class="series"><img class="poster" src="/api/v1/series/\(series.id)/cover" alt="">
-                <div><h1>\(h(series.title))</h1><p class="facts">\(h(facts.joined(separator: " · ")))</p>
-                \(series.genres.isEmpty ? "" : "<p class=\"genres\">\(h(series.genres.map(strings.genre).joined(separator: ", ")))</p>")
-                \(series.summary.map { "<p class=\"summary\">\(h($0))</p>" } ?? "")
-                \(series.matchStatus == "unmatched" ? "<p class=\"hint\">\(h(strings["unmatched"]))</p>" : "")
-                </div></div>
-                """)
-            page.add("<ul class=\"books\">")
-            for book in context.store.books(seriesID: series.id) {
-                let details = [book.pageCount.map { "\($0) \(strings["pages"])" }, book.format.rawValue.uppercased(), strings.size(book.fileSize),
-                               book.analysisError != nil ? strings["unreadable"] : nil].compactMap { $0 }
-                page.add("""
-                    <li><img src="/api/v1/books/\(book.id)/cover" alt="" loading="lazy">
-                    <div><strong>\(h(strings.bookTitle(book, kind: series.kind)))</strong><span>\(h(details.joined(separator: " · ")))</span></div>
-                    <a class="button quiet" href="/api/v1/books/\(book.id)/file">\(h(strings["download"]))</a></li>
-                    """)
-            }
-            page.add("</ul>")
-            return .html(page.html)
         }
 
         // MARK: Libraries
@@ -375,17 +302,8 @@ nonisolated enum AdminRoutes {
         return "Web"
     }
 
-    private static func host(_ request: Request) -> String {
+    static func host(_ request: Request) -> String {
         "http://" + (request.header("Host") ?? "server:7272")
-    }
-
-    private static func grid(_ series: [SeriesRecord], strings: Strings) -> String {
-        "<ul class=\"grid\">" + series.map { item in
-            """
-            <li><a href="/series/\(item.id)"><img src="/api/v1/series/\(item.id)/cover" alt="" loading="lazy">\
-            <strong>\(h(item.title))</strong><span>\(h(strings.bookCount(item.bookCount, kind: item.kind)))</span></a></li>
-            """
-        }.joined() + "</ul>"
     }
 
     private static func libraryChoices(_ libraries: [LibraryRecord], all: Bool, chosen: [Int], strings: Strings) -> String {
@@ -426,19 +344,25 @@ nonisolated func h(_ text: String) -> String {
         .replacingOccurrences(of: ">", with: "&gt;").replacingOccurrences(of: "\"", with: "&quot;")
 }
 
-/// A page with the server's header and menu.
+/// A page with the server's header: search and menu.
 nonisolated struct WebPage {
     var title: String
     var strings: Strings
     var caller: Caller
+    /// The menu entry this page belongs to.
+    var section: String?
+    /// What the search field shows.
+    var search: String
     /// Seconds after which the page reloads itself, while something it shows is under way.
     var refresh: Int?
     private var body = ""
 
-    init(title: String, strings: Strings, caller: Caller) {
+    init(title: String, strings: Strings, caller: Caller, section: String? = nil, search: String = "") {
         self.title = title
         self.strings = strings
         self.caller = caller
+        self.section = section
+        self.search = search
     }
 
     mutating func add(_ html: String) { body += html + "\n" }
@@ -449,10 +373,15 @@ nonisolated struct WebPage {
             links += [("/libraries", strings["libraries"]), ("/members", strings["members"]), ("/devices", strings["devices"]),
                       ("/server", strings["server"])]
         }
-        let menu = links.map { "<a href=\"\($0.0)\">\(h($0.1))</a>" }.joined()
+        let current = section ?? ""
+        let menu = links.map { link in
+            "<a href=\"\(link.0)\"\(current == link.0 ? " aria-current=\"page\"" : "")>\(h(link.1))</a>"
+        }.joined()
         return Self.document(title: title, language: strings.language, refresh: refresh, body: """
-            <header class="top"><a class="brand" href="/">Cool Reader <span>Server</span></a><nav>\(menu)
-            <form method="post" action="/logout"><button class="link">\(h(strings["signOut"]))</button></form></nav></header>
+            <header class="top"><a class="brand" href="/">Cool Reader <span>Server</span></a>
+            <form class="search" method="get" action="/search" role="search"><input type="search" name="q" value="\(h(search))" \
+            placeholder="\(h(strings["searchPlaceholder"]))" aria-label="\(h(strings["search"]))"></form>
+            <nav>\(menu)<form method="post" action="/logout"><button class="link">\(h(strings["signOut"]))</button></form></nav></header>
             <main>\(body)</main>
             """)
     }
@@ -463,52 +392,95 @@ nonisolated struct WebPage {
             """)
     }
 
-    private static func document(title: String, language: String, refresh: Int? = nil, body: String) -> String {
+    static func document(title: String, language: String, refresh: Int? = nil, body: String, bodyClass: String? = nil) -> String {
         """
         <!doctype html><html lang="\(language)"><head><meta charset="utf-8">\(refresh.map { "<meta http-equiv=\"refresh\" content=\"\($0)\">" } ?? "")
-        <meta name="viewport" content="width=device-width, initial-scale=1"><title>\(h(title))</title>
-        <link rel="stylesheet" href="/style.css"></head><body>\(body)</body></html>
+        <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"><meta name="color-scheme" content="dark">
+        <title>\(h(title))</title><link rel="stylesheet" href="/style.css?v=\(version(of: css))"></head><body\(bodyClass.map { " class=\"\($0)\"" } ?? "")>\(body)</body></html>
         """
     }
 
+    /// A short hash of a file the pages load, put in its address: a new server's style and scripts replace the
+    /// ones browsers keep for an hour.
+    static func version(of text: String) -> String {
+        SHA256.hash(data: Data(text.utf8)).prefix(6).map { String(format: "%02x", $0) }.joined()
+    }
+
+    /// Dark, like Plex: covers stand out and the reader stays in the dark.
     static let css = """
-    :root { --bg: #f6f5f3; --surface: #ffffff; --ink: #1d1b19; --muted: #6b6560; --line: #e2ddd7; --accent: #c4412b;
-      --accent-ink: #ffffff; --ok: #2e7a4b; --danger: #b3261e; color-scheme: light; }
-    @media (prefers-color-scheme: dark) { :root { --bg: #141312; --surface: #1e1c1b; --ink: #ede9e4; --muted: #a39c95;
-      --line: #34302d; --accent: #e0573c; --accent-ink: #1b0f0b; --ok: #64c38a; --danger: #ff8a80; color-scheme: dark; } }
+    :root { --bg: #111113; --surface: #1a1a1d; --raised: #24242a; --ink: #f2efea; --muted: #a39e97; --line: #2e2e33;
+      --accent: #e8643f; --accent-ink: #1b0e09; --ok: #6fd093; --danger: #ff8a7d; color-scheme: dark; }
     * { box-sizing: border-box; }
-    body { margin: 0; background: var(--bg); color: var(--ink); font: 16px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+    body { margin: 0; background: var(--bg); color: var(--ink); font: 16px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      -webkit-font-smoothing: antialiased; }
     a { color: inherit; }
-    .top { display: flex; flex-wrap: wrap; gap: 12px 24px; align-items: center; justify-content: space-between;
-      padding: 14px max(16px, env(safe-area-inset-left)); border-bottom: 1px solid var(--line); background: var(--surface); }
-    .brand { font-weight: 700; text-decoration: none; letter-spacing: 0.01em; margin: 0; }
+    .top { position: sticky; top: 0; z-index: 10; display: flex; flex-wrap: wrap; gap: 10px 22px; align-items: center;
+      padding: 12px max(16px, env(safe-area-inset-left)); background: rgb(17 17 19 / 0.88); border-bottom: 1px solid var(--line);
+      backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); }
+    .brand { font-weight: 700; text-decoration: none; letter-spacing: 0.01em; margin: 0; white-space: nowrap; }
     .brand span { color: var(--accent); }
-    nav { display: flex; flex-wrap: wrap; gap: 6px 18px; align-items: center; }
+    .search { flex: 1 1 180px; max-width: 360px; }
+    .search input { width: 100%; padding: 7px 14px; border-radius: 999px; background: var(--raised); border-color: transparent; }
+    nav { display: flex; flex-wrap: wrap; gap: 6px 18px; align-items: center; margin-left: auto; }
     nav a { text-decoration: none; color: var(--muted); }
-    nav a:hover { color: var(--ink); }
+    nav a:hover, nav a[aria-current] { color: var(--ink); }
     nav form { margin: 0; }
-    main { max-width: 1100px; margin: 0 auto; padding: 24px max(16px, env(safe-area-inset-left)) 64px; }
+    main { max-width: 1320px; margin: 0 auto; padding: 24px max(16px, env(safe-area-inset-left)) 64px; }
     main.card { max-width: 420px; margin: 8vh auto; background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 28px; }
     h1 { font-size: 28px; line-height: 1.15; margin: 8px 0 16px; text-wrap: balance; }
     h2 { font-size: 19px; margin: 32px 0 12px; }
     h1 small, h2 small { font-size: 14px; font-weight: 400; color: var(--muted); margin-left: 6px; }
     h2 a { text-decoration: none; }
-    .grid { list-style: none; padding: 0; margin: 0; display: grid; gap: 18px 14px; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); }
-    .grid a { display: flex; flex-direction: column; gap: 4px; text-decoration: none; }
-    .grid img { width: 100%; aspect-ratio: 2 / 3; object-fit: cover; border-radius: 6px; background: var(--line); box-shadow: 0 1px 3px rgb(0 0 0 / 0.15); }
-    .grid strong { font-size: 14px; line-height: 1.25; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
-    .grid span, .row span, .books span, .facts, .genres { font-size: 13px; color: var(--muted); }
-    .series { display: grid; grid-template-columns: minmax(120px, 220px) 1fr; gap: 24px; align-items: start; margin-bottom: 24px; }
-    .series .poster { width: 100%; border-radius: 8px; box-shadow: 0 2px 10px rgb(0 0 0 / 0.2); background: var(--line); }
-    .summary { max-width: 70ch; white-space: pre-line; }
-    @media (max-width: 560px) { .series { grid-template-columns: 1fr; } .series .poster { max-width: 200px; } }
-    .books { list-style: none; padding: 0; margin: 0; border-top: 1px solid var(--line); }
-    .books li { display: grid; grid-template-columns: 44px 1fr auto; gap: 14px; align-items: center; padding: 10px 0; border-bottom: 1px solid var(--line); }
-    .books img { width: 44px; aspect-ratio: 2 / 3; object-fit: cover; border-radius: 4px; background: var(--line); }
-    .books div, .row div { display: flex; flex-direction: column; min-width: 0; }
+    .row-section { margin-top: 28px; }
+    .row-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+    .row-head h2 { margin: 0 0 12px; }
+    .more { color: var(--muted); text-decoration: none; font-size: 14px; white-space: nowrap; }
+    .more:hover { color: var(--ink); }
+    .shelf { display: grid; grid-auto-flow: column; grid-auto-columns: 148px; gap: 16px; overflow-x: auto; padding: 4px 2px 12px;
+      scroll-snap-type: x proximity; scrollbar-width: thin; }
+    .shelf > * { scroll-snap-align: start; }
+    .grid { display: grid; gap: 22px 16px; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); }
+    .card { display: flex; flex-direction: column; gap: 4px; text-decoration: none; min-width: 0; }
+    .card > a { display: flex; flex-direction: column; gap: 4px; text-decoration: none; }
+    .art { position: relative; display: block; border-radius: 6px; overflow: hidden; background: var(--raised);
+      box-shadow: 0 2px 10px rgb(0 0 0 / 0.45); transition: transform 0.15s ease, box-shadow 0.15s ease; }
+    .card:hover .art, .card a:focus-visible .art { transform: translateY(-3px); box-shadow: 0 8px 22px rgb(0 0 0 / 0.55); }
+    .art img { display: block; width: 100%; aspect-ratio: 2 / 3; object-fit: cover; }
+    .card strong { font-size: 14px; line-height: 1.25; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+    .sub { font-size: 13px; color: var(--muted); }
+    .badge { position: absolute; top: 6px; right: 6px; min-width: 24px; height: 24px; padding: 0 7px; border-radius: 999px; background: var(--accent);
+      color: var(--accent-ink); font-size: 13px; font-weight: 700; display: grid; place-items: center; box-shadow: 0 1px 4px rgb(0 0 0 / 0.5); }
+    .badge.done { background: rgb(17 17 19 / 0.82); color: var(--ok); }
+    .art .bar { position: absolute; left: 0; right: 0; bottom: 0; height: 4px; background: rgb(0 0 0 / 0.6); }
+    .art .bar span { display: block; height: 100%; background: var(--accent); }
+    .tools { display: flex; flex-wrap: wrap; gap: 2px 12px; font-size: 13px; }
+    .tools a, .tools button { color: var(--muted); text-decoration: none; font-size: 13px; }
+    .tools a:hover, .tools button:hover { color: var(--ink); }
+    .volumes { grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); }
+    .hero { position: relative; margin: -24px calc(-1 * max(16px, env(safe-area-inset-left))) 8px; padding: 48px max(16px, env(safe-area-inset-left)) 28px;
+      overflow: hidden; isolation: isolate; }
+    .backdrop { position: absolute; inset: 0; z-index: -2; background-size: cover; background-position: center 30%;
+      filter: blur(28px) brightness(0.42) saturate(1.2); transform: scale(1.15); }
+    .hero.banner .backdrop { filter: brightness(0.45); transform: none; }
+    .hero::after { content: ""; position: absolute; inset: 0; z-index: -1; background: linear-gradient(to bottom, rgb(17 17 19 / 0.1), var(--bg) 96%); }
+    .hero-body { display: grid; grid-template-columns: minmax(130px, 230px) 1fr; gap: 28px; align-items: end; max-width: 1320px; margin: 0 auto; }
+    .poster { width: 100%; border-radius: 8px; box-shadow: 0 10px 30px rgb(0 0 0 / 0.6); background: var(--raised); }
+    .info h1 { font-size: clamp(28px, 4vw, 44px); margin: 0 0 8px; }
+    .facts { color: var(--muted); margin: 0 0 10px; }
+    .chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 14px; }
+    .chip { font-size: 13px; border: 1px solid rgb(255 255 255 / 0.18); border-radius: 999px; padding: 2px 10px; color: var(--ink); }
+    .actions { margin: 0 0 14px; }
+    .button.play { font-size: 17px; padding: 10px 22px; }
+    .summary { max-width: 72ch; white-space: pre-line; margin: 0; color: #ddd8d1; }
+    @media (max-width: 620px) { .hero-body { grid-template-columns: 1fr; } .poster { max-width: 170px; } .top { position: static; } }
+    .heading { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 8px 20px; }
+    .sort { display: flex; gap: 14px; margin: 0; }
+    .sort a { color: var(--muted); text-decoration: none; }
+    .sort a[aria-current] { color: var(--ink); font-weight: 600; }
     .rows { display: flex; flex-direction: column; border-top: 1px solid var(--line); }
     .row, .member { display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: center; padding: 14px 0; border-bottom: 1px solid var(--line); }
-    .row > div { flex: 1 1 260px; }
+    .row > div { flex: 1 1 260px; display: flex; flex-direction: column; min-width: 0; }
+    .row span { font-size: 13px; color: var(--muted); }
     .row code { font-size: 13px; overflow-wrap: anywhere; }
     .member .who { flex: 1 1 100%; }
     .tag { font-size: 12px; color: var(--muted); border: 1px solid var(--line); border-radius: 999px; padding: 1px 8px; margin-left: 4px; }
@@ -519,7 +491,7 @@ nonisolated struct WebPage {
     .choices { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: center; border: 0; padding: 0; margin: 0; }
     label { display: flex; flex-direction: column; gap: 6px; font-size: 14px; color: var(--muted); }
     label.check { flex-direction: row; align-items: center; gap: 6px; color: var(--ink); }
-    input, select { font: inherit; color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 9px 11px; }
+    input, select { font: inherit; color: var(--ink); background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 9px 11px; }
     input.code { font-variant-numeric: tabular-nums; letter-spacing: 0.2em; max-width: 12ch; }
     input:focus, select:focus, button:focus-visible, a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
     button, .button { font: inherit; font-weight: 600; border: 0; border-radius: 8px; padding: 9px 16px; background: var(--accent);
@@ -538,5 +510,25 @@ nonisolated struct WebPage {
     .steps { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 8px; max-width: 46ch; }
     .fingerprint { overflow-wrap: anywhere; font-size: 13px; }
     #invitation-link { width: 100%; max-width: 640px; font-size: 13px; margin-bottom: 4px; }
+    body.reader-page { background: #000; overflow: hidden; }
+    #reader { position: fixed; inset: 0; display: grid; place-items: center; background: #000; user-select: none; -webkit-user-select: none; }
+    #page { display: block; max-width: 100vw; max-height: 100vh; max-height: 100dvh; object-fit: contain; }
+    .zones { position: fixed; inset: 0; display: grid; grid-template-columns: 1fr 1fr 1fr; }
+    .zone { background: transparent; border: 0; border-radius: 0; padding: 0; margin: 0; cursor: pointer; -webkit-tap-highlight-color: transparent; }
+    .zone:focus-visible { outline: none; }
+    #reader .bar { position: fixed; left: 0; right: 0; z-index: 2; display: flex; align-items: center; gap: 16px; color: #eee;
+      padding: max(10px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) 10px max(16px, env(safe-area-inset-left));
+      background: rgb(0 0 0 / 0.74); transition: opacity 0.2s ease; }
+    #reader .bar.top { top: 0; }
+    #reader .bar.bottom { bottom: 0; padding-bottom: max(14px, env(safe-area-inset-bottom)); }
+    #reader:not(.chrome) .bar { opacity: 0; pointer-events: none; }
+    #reader .back { text-decoration: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 40%; }
+    #reader .title { flex: 1; text-align: center; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #bbb; }
+    #counter { font-variant-numeric: tabular-nums; color: #bbb; }
+    #scrub { width: 100%; accent-color: var(--accent); background: transparent; border: 0; padding: 0; }
+    #end { position: fixed; inset: 0; z-index: 3; display: grid; place-content: center; justify-items: center; gap: 8px; text-align: center;
+      background: rgb(0 0 0 / 0.86); font-size: 18px; }
+    #end[hidden] { display: none; }
+    @media (prefers-reduced-motion: reduce) { .art, #reader .bar { transition: none; } }
     """
 }

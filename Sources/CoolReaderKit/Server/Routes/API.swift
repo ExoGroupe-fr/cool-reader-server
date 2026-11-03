@@ -272,8 +272,11 @@ nonisolated enum APIRoutes {
             let (book, _, _) = try context.visibleBook(request.parameter("id"), for: caller)
             let update = try decode(ProgressUpdate.self, request)
             let fraction = update.fraction.map { min(max($0, 0), 1) }
+            // A comic's page is an index into its pages; a text book's is the app's own count.
+            var page = max(0, update.page)
+            if !book.isText, let count = book.pageCount, count > 0 { page = min(page, count - 1) }
             try context.store.setProgress(userID: caller.user.id, ProgressRecord(
-                bookID: book.id, page: max(0, update.page), finished: update.finished ?? false,
+                bookID: book.id, page: page, finished: update.finished ?? false,
                 position: update.position.map { String($0.prefix(2000)) }, fraction: fraction,
                 updatedAt: min(update.updatedAt ?? Date(), Date())))
             return .json(context.store.progress(userID: caller.user.id, bookID: book.id).map(info))

@@ -498,6 +498,42 @@ nonisolated final class Store: Sendable {
                        position: row.string("position"), fraction: row.double("fraction"), updatedAt: row.date("updated_at") ?? Date())
     }
 
+    // MARK: - Reading
+
+    /// What a member is reading: books started and not finished, the last read first.
+    func readingNow(userID: Int, libraryIDs: [Int], limit: Int) -> [(book: BookRecord, progress: ProgressRecord)] {
+        guard !libraryIDs.isEmpty else { return [] }
+        let marks = libraryIDs.map { _ in "?" }.joined(separator: ",")
+        let arguments: [(any SQLBindable)?] = [userID] + libraryIDs.map { $0 as (any SQLBindable)? } + [limit]
+        let rows = (try? database.query("""
+            SELECT b.* FROM progress p JOIN books b ON b.id = p.book_id
+            WHERE p.user_id = ? AND p.finished = 0 AND (p.page > 0 OR p.fraction > 0) AND b.library_id IN (\(marks))
+            ORDER BY p.updated_at DESC LIMIT ?
+            """, arguments)) ?? []
+        return rows.map(book(from:)).compactMap { book in progress(userID: userID, bookID: book.id).map { (book, $0) } }
+    }
+
+    /// A member's progress in the books of a series, by book.
+    func progress(userID: Int, seriesID: Int) -> [Int: ProgressRecord] {
+        let rows = (try? database.query("""
+            SELECT p.* FROM progress p JOIN books b ON b.id = p.book_id WHERE p.user_id = ? AND b.series_id = ?
+            """, [userID, seriesID])) ?? []
+        return Dictionary(rows.map(progress(from:)).map { ($0.bookID, $0) }, uniquingKeysWith: { $1 })
+    }
+
+    /// How many books of each series a member finished, by series.
+    func finishedCounts(userID: Int) -> [Int: Int] {
+        let rows = (try? database.query("""
+            SELECT b.series_id AS series_id, COUNT(*) AS n FROM progress p JOIN books b ON b.id = p.book_id
+            WHERE p.user_id = ? AND p.finished = 1 GROUP BY b.series_id
+            """, [userID])) ?? []
+        var counts: [Int: Int] = [:]
+        for row in rows {
+            if let id = row.int("series_id") { counts[id] = row.int("n") ?? 0 }
+        }
+        return counts
+    }
+
     // MARK: - Invitations
 
     func addInvitation(userID: Int, secretHash: String, expiresAt: Date) throws -> Int {

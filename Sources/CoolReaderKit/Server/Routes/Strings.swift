@@ -106,6 +106,27 @@ nonisolated struct Strings: Sendable {
                              "A QR code to scan with the iPhone or iPad, valid for half an hour."),
         "showQRCode": ("Afficher le code QR", "Show the QR code"),
         "appOnly": ("appli seulement", "app only"),
+        "continueReading": ("Reprendre la lecture", "Continue reading"),
+        "seeAll": ("Tout voir", "See all"),
+        "read": ("Lire", "Read"),
+        "resume": ("Reprendre", "Resume"),
+        "readAgain": ("Relire depuis le début", "Read again"),
+        "readBadge": ("Lu", "Read"),
+        "markRead": ("Marquer comme lu", "Mark as read"),
+        "markUnread": ("Marquer comme non lu", "Mark as unread"),
+        "search": ("Rechercher", "Search"),
+        "searchPlaceholder": ("Rechercher une série", "Search for a series"),
+        "noResults": ("Aucune série ne correspond.", "No series matches."),
+        "sortTitle": ("Titre", "Title"),
+        "textBooksHint": ("Les romans se lisent dans Cool Reader, ou après les avoir téléchargés.",
+                          "Novels are read in Cool Reader, or after downloading them."),
+        "endOfBook": ("Fin du tome.", "The end of this book."),
+        "nextBook": ("À suivre", "Next"),
+        "backToSeries": ("Retour à la série", "Back to the series"),
+        "previousPage": ("Page précédente", "Previous page"),
+        "nextPage": ("Page suivante", "Next page"),
+        "menu": ("Afficher ou masquer les commandes", "Show or hide the controls"),
+        "fullScreen": ("Plein écran", "Full screen"),
         "remoteAccess": ("Accès à distance", "Remote access"),
         "remoteIntro": ("Pour lire hors de chez vous sans VPN : le serveur demande à votre box d'ouvrir son port (UPnP ou NAT-PMP) et met son adresse publique dans les invitations. Tout reste chiffré en HTTPS, rien ne passe par un service tiers.",
                         "To read away from home without a VPN: the server asks your router to open its port (UPnP or NAT-PMP) and puts its public address in invitations. Everything stays encrypted over HTTPS, and nothing goes through a third party."),
@@ -182,6 +203,18 @@ nonisolated struct Strings: Sendable {
         formatter.dateStyle = .medium
         formatter.timeStyle = .short
         return formatter.string(from: date)
+    }
+
+    func searchTitle(_ text: String) -> String {
+        language == "fr" ? "Résultats pour « \(text) »" : "Results for \u{201C}\(text)\u{201D}"
+    }
+
+    func pageOf(_ page: Int, _ count: Int) -> String {
+        language == "fr" ? "page \(page) sur \(count)" : "page \(page) of \(count)"
+    }
+
+    func unreadCount(_ count: Int) -> String {
+        language == "fr" ? (count == 1 ? "1 non lu" : "\(count) non lus") : "\(count) unread"
     }
 
     func invitationTitle(_ member: String?) -> String {

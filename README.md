@@ -30,6 +30,8 @@ machine and only reach the devices you pair.
   public address in invitations; a free DuckDNS name follows an address that changes. A VPN such as Tailscale
   works too, and is never required.
 - **Bonjour**: Cool Reader finds the server on the home network by itself.
+- **In the browser**, in the spirit of Plex: what you're reading, what's new, each library's series, search, and a
+  reader for comics, manga and PDFs that turns manga right to left and keeps your page in step with Cool Reader.
 - **OPDS 1.2** with page streaming: Panels, Chunky, KOReader or any OPDS reader can browse, download and read
   page by page.
 

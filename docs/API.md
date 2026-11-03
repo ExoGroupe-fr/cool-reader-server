@@ -136,7 +136,8 @@ Per member, for every device they use.
  "updatedAt": "2026-11-03T10:00:00Z"}
 ```
 
-- `page` is required; the rest is optional.
+- `page` is required; the rest is optional. For a comic or a PDF, `page` is the index of the page shown, from 0, and
+  the server keeps it within the book. For a text book it's the client's own count, kept as it is.
 - `updatedAt` is when it was read, and defaults to now. The server keeps the newer of what it has and what it gets,
   so a device that read offline can send its progress later.
 - The answer is the stored `ProgressInfo`.
