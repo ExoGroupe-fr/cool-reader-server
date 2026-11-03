@@ -9,7 +9,8 @@ Free and open source (MIT). No account to create anywhere, no relay, nothing to 
 machine and only reach the devices you pair.
 
 > **Status: 0.1, young.** Everything below works and is tested, but it's new: keep backups of your config folder
-> and report what breaks.
+> and report what breaks. Cool Reader connects to the server from its next version; until then, read in the
+> browser or in an OPDS reader.
 
 ## What it does
 
