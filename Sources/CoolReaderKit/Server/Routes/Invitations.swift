@@ -43,10 +43,29 @@ nonisolated enum InvitationRoutes {
                 <p class="hint">\(h(strings["serverNameHint"]))</p>
                 <button>\(h(strings["save"]))</button></form>
                 """)
-            let addresses = context.addresses(requestHost: request.header("Host"), local: await context.network.local, public: [])
+            if let message = request.query["error"] { page.add("<p class=\"error\">\(h(strings[message]))</p>") }
+            let addresses = context.addresses(requestHost: request.header("Host"), local: NetworkInterfaces.localAddresses(), public: [])
             page.add("<h2>\(h(strings["homeAddresses"]))</h2>")
             page.add(addresses.isEmpty ? "<p class=\"empty\">\(h(strings["noAddress"]))</p>"
                                        : "<p>" + addresses.map { "<code>\(h($0))</code>" }.joined(separator: " · ") + "</p>")
+            let settings = context.remoteSettings
+            let status = await context.remoteAccess.status
+            if status.state == .working { page.refresh = 3 }
+            let tone = status.state == .open || status.state == .manual ? "ok" : status.state == .failed ? "error" : "status"
+            page.add("""
+                <h2 id="remote">\(h(strings["remoteAccess"]))</h2><p class="hint">\(h(strings["remoteIntro"]))</p>
+                <p class="\(tone)">\(h(strings.remoteStatus(status, port: context.config.port)))</p>
+                \(status.detail.map { "<p class=\"hint\"><code>\(h($0))</code></p>" } ?? "")
+                <form class="stack" method="post" action="/server/remote">
+                <label class="check"><input type="checkbox" name="enabled"\(settings.isEnabled ? " checked" : "")> \(h(strings["remoteEnable"]))</label>
+                <label>\(h(strings["remotePort"]))<input name="port" inputmode="numeric" value="\(settings.externalPort.map(String.init) ?? "")" placeholder="\(context.config.port)"></label>
+                <label>\(h(strings["remoteHost"]))<input name="host" value="\(h(settings.publicHost ?? ""))" placeholder="books.example.org" autocomplete="off"></label>
+                <label>\(h(strings["duckDNSDomain"]))<input name="duckdns" value="\(h(settings.duckDNSDomain ?? ""))" placeholder="myserver" autocomplete="off"></label>
+                <label>\(h(strings["duckDNSToken"]))<input name="token" type="password" autocomplete="off" placeholder="\(settings.duckDNSToken == nil ? "" : "••••••••")"></label>
+                \(settings.duckDNSToken == nil ? "" : "<p class=\"hint\">\(h(strings["duckDNSTokenKept"]))</p>")
+                <p class="hint">\(h(strings["remoteInvitationsHint"]))</p>
+                <button>\(h(strings["save"]))</button></form>
+                """)
             page.add("""
                 <h2>\(h(strings["certificate"]))</h2>
                 <p class="hint">\(h(strings["certificateHint"]))</p>
@@ -59,8 +78,39 @@ nonisolated enum InvitationRoutes {
         router.add(.POST, "/server") { request in
             _ = try await AdminRoutes.adminAction(request, context)
             let name = (request.form["name"] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-            if !name.isEmpty { try context.store.setSetting("server_name", String(name.prefix(60))) }
+            if !name.isEmpty {
+                try context.store.setSetting("server_name", String(name.prefix(60)))
+                await context.advertising.rename(context.serverName)
+            }
             return .redirect("/server?saved=1")
+        }
+
+        router.add(.POST, "/server/remote") { request in
+            _ = try await AdminRoutes.adminAction(request, context)
+            let form = request.form
+            func field(_ name: String) -> String? {
+                let value = (form[name] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                return value.isEmpty ? nil : value
+            }
+            var settings = context.remoteSettings
+            settings.isEnabled = form["enabled"] != nil
+            if let port = field("port") {
+                guard let number = Int(port), (1...65535).contains(number) else { return .redirect("/server?error=badPort#remote") }
+                settings.externalPort = number
+            } else {
+                settings.externalPort = nil
+            }
+            settings.publicHost = field("host")
+            settings.duckDNSDomain = field("duckdns")
+            if let domain = settings.duckDNSDomain {
+                guard DuckDNS.subdomain(domain) != nil else { return .redirect("/server?error=badDuckDNS#remote") }
+                if let token = field("token") { settings.duckDNSToken = token }
+                guard settings.duckDNSToken != nil else { return .redirect("/server?error=duckDNSTokenMissing#remote") }
+            } else {
+                settings.duckDNSToken = nil
+            }
+            try await context.saveRemoteSettings(settings)
+            return .redirect("/server?saved=1#remote")
         }
     }
 
@@ -68,8 +118,7 @@ nonisolated enum InvitationRoutes {
     static func invitationPage(for user: UserRecord, lifetime: TimeInterval, caller: Caller, request: Request,
                                context: ServerContext) async throws -> Response {
         let strings = Strings(request.language)
-        let addresses = context.addresses(requestHost: request.header("Host"), local: await context.network.local,
-                                          public: await context.network.publicEndpoints)
+        let addresses = await context.currentAddresses(requestHost: request.header("Host"))
         let invitation = try context.invite(user, lifetime: lifetime, addresses: addresses)
         Log.info("Invitation made for \(user.name), valid until \(invitation.expiresAt).")
         let isOwn = user.id == caller.user.id

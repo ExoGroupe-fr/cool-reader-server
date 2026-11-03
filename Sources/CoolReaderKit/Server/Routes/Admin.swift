@@ -431,6 +431,8 @@ nonisolated struct WebPage {
     var title: String
     var strings: Strings
     var caller: Caller
+    /// Seconds after which the page reloads itself, while something it shows is under way.
+    var refresh: Int?
     private var body = ""
 
     init(title: String, strings: Strings, caller: Caller) {
@@ -448,7 +450,7 @@ nonisolated struct WebPage {
                       ("/server", strings["server"])]
         }
         let menu = links.map { "<a href=\"\($0.0)\">\(h($0.1))</a>" }.joined()
-        return Self.document(title: title, language: strings.language, body: """
+        return Self.document(title: title, language: strings.language, refresh: refresh, body: """
             <header class="top"><a class="brand" href="/">Cool Reader <span>Server</span></a><nav>\(menu)
             <form method="post" action="/logout"><button class="link">\(h(strings["signOut"]))</button></form></nav></header>
             <main>\(body)</main>
@@ -461,9 +463,9 @@ nonisolated struct WebPage {
             """)
     }
 
-    private static func document(title: String, language: String, body: String) -> String {
+    private static func document(title: String, language: String, refresh: Int? = nil, body: String) -> String {
         """
-        <!doctype html><html lang="\(language)"><head><meta charset="utf-8">
+        <!doctype html><html lang="\(language)"><head><meta charset="utf-8">\(refresh.map { "<meta http-equiv=\"refresh\" content=\"\($0)\">" } ?? "")
         <meta name="viewport" content="width=device-width, initial-scale=1"><title>\(h(title))</title>
         <link rel="stylesheet" href="/style.css"></head><body>\(body)</body></html>
         """

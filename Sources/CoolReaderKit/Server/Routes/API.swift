@@ -141,8 +141,7 @@ nonisolated enum APIRoutes {
 
         router.add(.GET, "/api/v1/server/addresses") { request in
             _ = try await context.requireCaller(request)
-            return .json(Addresses(addresses: context.addresses(requestHost: nil, local: await context.network.local,
-                                                                public: await context.network.publicEndpoints)))
+            return .json(Addresses(addresses: await context.currentAddresses(requestHost: nil)))
         }
 
         router.add(.POST, "/api/v1/invitations/redeem") { request in

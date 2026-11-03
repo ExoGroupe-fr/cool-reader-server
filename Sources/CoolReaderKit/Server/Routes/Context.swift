@@ -23,7 +23,8 @@ nonisolated final class ServerContext: Sendable {
     let setup: SetupState
     let serverID: String
     let certificate: ServerCertificate
-    let network = NetworkState()
+    let remoteAccess: RemoteAccess
+    let advertising = Advertising()
     private let basicLogins = VerifiedLogins()
 
     init(config: ServerConfig, store: Store) throws {
@@ -41,6 +42,29 @@ nonisolated final class ServerContext: Sendable {
         }
         setup = SetupState(needed: store.userCount() == 0, file: config.configDirectory.appendingPathComponent("setup-code.txt"))
         certificate = try ServerCertificate.loadOrCreate(in: config.configDirectory.appendingPathComponent("tls"))
+        let remoteSettings = store.setting("remote_access").flatMap { try? JSONDecoder().decode(RemoteAccessSettings.self, from: Data($0.utf8)) }
+        remoteAccess = RemoteAccess(localPort: config.port, settings: remoteSettings ?? RemoteAccessSettings())
+    }
+
+    // MARK: - Remote access
+
+    var remoteSettings: RemoteAccessSettings {
+        store.setting("remote_access").flatMap { try? JSONDecoder().decode(RemoteAccessSettings.self, from: Data($0.utf8)) }
+            ?? RemoteAccessSettings()
+    }
+
+    func saveRemoteSettings(_ settings: RemoteAccessSettings) async throws {
+        try store.setSetting("remote_access", String(decoding: try JSONEncoder().encode(settings), as: UTF8.self))
+        await remoteAccess.update(settings)
+    }
+
+    /// The public addresses the settings name, without asking the router: for invitations made from the command
+    /// line, while the running server may be the one that opened the port.
+    var configuredPublicEndpoints: [String] {
+        let settings = remoteSettings
+        let port = settings.externalPort ?? config.port
+        let hosts = [settings.publicHost, settings.duckDNSDomain.flatMap(DuckDNS.host)].compactMap { $0 }.filter { !$0.isEmpty }
+        return hosts.map { RemoteAccess.endpoint($0, port: port) }
     }
 
     /// The name devices show: the admin's choice, else the configuration's.
@@ -71,6 +95,11 @@ nonisolated final class ServerContext: Sendable {
             URLQueryItem(name: "i", value: secret),
         ]
         return Invitation(secret: secret, link: components.string ?? "", expiresAt: expiresAt)
+    }
+
+    /// Where devices reach this server now: this machine's addresses, and the public ones while remote access works.
+    func currentAddresses(requestHost: String?) async -> [String] {
+        addresses(requestHost: requestHost, local: NetworkInterfaces.localAddresses(), public: await remoteAccess.publicEndpoints)
     }
 
     /// Where devices reach this server, best first, as "host:port": the configured addresses, the one a browser used
@@ -220,14 +249,32 @@ actor SetupState {
     }
 }
 
-/// The addresses this server is known at, kept current by its network services: the machine's own on the home
-/// network, and the public ones when remote access works.
-actor NetworkState {
-    private(set) var local: [String] = []
-    private(set) var publicEndpoints: [String] = []
+/// The server's Bonjour record: Cool Reader lists it under its name, and finds it again by its id when its
+/// address changes. Made again when the admin renames the server.
+actor Advertising {
+    private var advertiser: ServiceAdvertiser?
 
-    func update(local: [String]) { self.local = local }
-    func update(publicEndpoints: [String]) { self.publicEndpoints = publicEndpoints }
+    func start(name: String, port: Int, txt: [String: String]) {
+        advertiser?.stop()
+        let next = ServiceAdvertiser(name: name, port: port, txt: txt)
+        do {
+            try next.start()
+            advertiser = next
+        } catch {
+            Log.warning("Bonjour: \(error). Cool Reader won't find the server by itself; type its address instead.")
+            advertiser = nil
+        }
+    }
+
+    func rename(_ name: String) {
+        guard let current = advertiser, current.name != name else { return }
+        start(name: name, port: current.port, txt: current.txt)
+    }
+
+    func stop() {
+        advertiser?.stop()
+        advertiser = nil
+    }
 }
 
 /// Basic credentials already checked, for ten minutes: OPDS readers send them with every request, and checking

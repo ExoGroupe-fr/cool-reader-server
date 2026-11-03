@@ -106,6 +106,22 @@ nonisolated struct Strings: Sendable {
                              "A QR code to scan with the iPhone or iPad, valid for half an hour."),
         "showQRCode": ("Afficher le code QR", "Show the QR code"),
         "appOnly": ("appli seulement", "app only"),
+        "remoteAccess": ("Accès à distance", "Remote access"),
+        "remoteIntro": ("Pour lire hors de chez vous sans VPN : le serveur demande à votre box d'ouvrir son port (UPnP ou NAT-PMP) et met son adresse publique dans les invitations. Tout reste chiffré en HTTPS, rien ne passe par un service tiers.",
+                        "To read away from home without a VPN: the server asks your router to open its port (UPnP or NAT-PMP) and puts its public address in invitations. Everything stays encrypted over HTTPS, and nothing goes through a third party."),
+        "remoteEnable": ("Ouvrir le port sur la box automatiquement", "Open the port on the router automatically"),
+        "remotePort": ("Port sur la box (facultatif)", "Port on the router (optional)"),
+        "remoteHost": ("Adresse ou nom public, si vous avez ouvert le port vous-même", "Public address or name, if you opened the port yourself"),
+        "duckDNSDomain": ("Nom DuckDNS, si l'adresse de la box change (gratuit sur duckdns.org)", "DuckDNS name, if the router's address changes (free at duckdns.org)"),
+        "duckDNSToken": ("Jeton DuckDNS", "DuckDNS token"),
+        "duckDNSTokenKept": ("Laissez le jeton vide pour garder celui qui est enregistré.", "Leave the token empty to keep the saved one."),
+        "remoteInvitationsHint": ("Les appareils déjà connectés apprennent l'adresse publique à leur prochaine connexion à la maison.",
+                                  "Devices already connected learn the public address the next time they connect at home."),
+        "badPort": ("Le port doit être un nombre de 1 à 65535.", "The port must be a number from 1 to 65535."),
+        "badDuckDNS": ("Ce n'est pas un nom DuckDNS : juste « monserveur » ou « monserveur.duckdns.org ».",
+                       "That isn't a DuckDNS name: just “myserver” or “myserver.duckdns.org”."),
+        "duckDNSTokenMissing": ("Il manque le jeton DuckDNS : il est en haut de la page de votre compte sur duckdns.org.",
+                                "The DuckDNS token is missing: it's at the top of your account page on duckdns.org."),
     ]
 
     subscript(_ key: String) -> String {
@@ -182,6 +198,48 @@ nonisolated struct Strings: Sendable {
         language == "fr"
             ? "Voici une invitation pour lire les livres de « \(server) » avec Cool Reader.\n1. Installe Cool Reader : \(appStore)\n2. Ouvre ce lien sur ton iPhone ou iPad : \(link)"
             : "Here's an invitation to read the books on \u{201C}\(server)\u{201D} with Cool Reader.\n1. Install Cool Reader: \(appStore)\n2. Open this link on your iPhone or iPad: \(link)"
+    }
+
+    /// Where remote access stands, in a sentence for the admin.
+    func remoteStatus(_ status: RemoteAccessStatus, port: Int) -> String {
+        let fr = language == "fr"
+        let external = status.externalPort ?? port
+        let local = status.localAddress.map { "\($0):\(port)" } ?? (fr ? "ce serveur" : "this server")
+        let address = status.publicHost ?? status.publicAddress ?? "?"
+        var sentence: String
+        switch (status.state, status.problem) {
+        case (.off, _):
+            sentence = fr ? "Fermé : le serveur n'est joignable qu'à la maison, ou par un VPN." : "Off: the server is only reachable at home, or through a VPN."
+        case (.working, _):
+            sentence = fr ? "Ouverture du port sur la box…" : "Opening the port on the router…"
+        case (.open, _):
+            let method = status.method ?? "UPnP"
+            sentence = fr ? "Ouvert : la box envoie le port \(external) vers \(local) (\(method)). Adresse publique : \(address)."
+                          : "Open: the router forwards port \(external) to \(local) (\(method)). Public address: \(address)."
+        case (.manual, _):
+            sentence = fr ? "Adresse publique : \(address). Le port \(external) doit être ouvert sur la box vers \(local)."
+                          : "Public address: \(address). Port \(external) must be forwarded on the router to \(local)."
+        case (.failed, .noGateway):
+            sentence = fr ? "Box introuvable : ce serveur ne voit pas de routeur sur son réseau. Avec Docker, il faut le réseau « host »."
+                          : "No router found: this server sees no gateway on its network. With Docker, use the host network."
+        case (.failed, .sharedAddress):
+            let shared = status.publicAddress.map { " (\($0))" } ?? ""
+            sentence = fr ? "Votre box n'a pas d'adresse publique à elle\(shared) : votre opérateur la partage (CGNAT), ou une autre box est devant. L'accès direct est impossible : demandez une adresse IPv4 dédiée à votre opérateur (c'est souvent gratuit), ou utilisez un VPN comme Tailscale."
+                          : "Your router has no public address of its own\(shared): your provider shares it (CGNAT), or another router sits in front. Direct access is impossible: ask your provider for a dedicated IPv4 address (often free), or use a VPN such as Tailscale."
+        case (.failed, .portTaken):
+            sentence = fr ? "Le port \(external) est déjà ouvert vers un autre appareil sur la box : choisissez un autre port ci-dessous."
+                          : "Port \(external) is already forwarded to another device on the router: choose another port below."
+        case (.failed, .routerRefused):
+            sentence = fr ? "La box a refusé d'ouvrir le port. Ouvrez vous-même le port \(external) (TCP) vers \(local), puis indiquez votre adresse publique ci-dessous."
+                          : "The router refused to open the port. Forward port \(external) (TCP) to \(local) yourself, then give your public address below."
+        case (.failed, _):
+            sentence = fr ? "La box ne répond ni en UPnP ni en NAT-PMP. Activez l'UPnP dans ses réglages, ou ouvrez vous-même le port \(external) (TCP) vers \(local) et indiquez votre adresse publique ci-dessous."
+                          : "The router answers neither UPnP nor NAT-PMP. Turn on UPnP in its settings, or forward port \(external) (TCP) to \(local) yourself and give your public address below."
+        }
+        if status.problem == .duckDNSFailed {
+            sentence += fr ? " DuckDNS a refusé la mise à jour : vérifiez le nom et le jeton." : " DuckDNS refused the update: check the name and the token."
+        }
+        return sentence
     }
 
     func size(_ bytes: Int64) -> String {

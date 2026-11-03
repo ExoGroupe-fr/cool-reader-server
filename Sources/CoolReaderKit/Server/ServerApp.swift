@@ -25,7 +25,7 @@ public enum CoolReaderServerApp {
             return "No member is called « \(name) ». Members: \(store.users().map(\.name).joined(separator: ", "))."
         }
         let context = try ServerContext(config: config, store: store)
-        let addresses = context.addresses(requestHost: nil, local: ServerInstance.localAddresses(), public: [])
+        let addresses = context.addresses(requestHost: nil, local: NetworkInterfaces.localAddresses(), public: context.configuredPublicEndpoints)
         let invitation = try context.invite(user, lifetime: 48 * 3600, addresses: addresses)
         return """
             Invitation for \(user.name), valid until \(invitation.expiresAt.formatted(date: .abbreviated, time: .shortened)), \
@@ -136,6 +136,9 @@ public final class ServerInstance: Sendable {
             break
         }
         Log.info("Listening on port \(port), HTTP and HTTPS.")
+        await context.advertising.start(name: context.serverName, port: port,
+                                        txt: ["id": context.serverID, "v": ServerContext.version, "api": "1"])
+        await context.remoteAccess.start()
 
         let scans = Task {
             while !Task.isCancelled {
@@ -143,13 +146,7 @@ public final class ServerInstance: Sendable {
                 try? await Task.sleep(for: .seconds(config.scanInterval * 60))
             }
         }
-        let network = Task {
-            while !Task.isCancelled {
-                await context.network.update(local: localAddresses())
-                try? await Task.sleep(for: .seconds(60))
-            }
-        }
-        return ServerInstance(context: context, port: port, tasks: [http, scans, network])
+        return ServerInstance(context: context, port: port, tasks: [http, scans])
     }
 
     /// Plain HTTP only from the home network: from anywhere else, pages move to HTTPS and the rest is refused,
@@ -169,8 +166,7 @@ public final class ServerInstance: Sendable {
         return Status(name: context.serverName, version: ServerContext.version, port: port, setupCode: await context.setup.code,
                       libraryCount: libraries.count, seriesCount: libraries.reduce(0) { $0 + $1.seriesCount },
                       bookCount: libraries.reduce(0) { $0 + $1.bookCount }, memberCount: context.store.userCount(),
-                      addresses: context.addresses(requestHost: nil, local: await context.network.local,
-                                                   public: await context.network.publicEndpoints),
+                      addresses: await context.currentAddresses(requestHost: nil),
                       fingerprint: context.certificate.fingerprint, configDirectory: context.config.configDirectory)
     }
 
@@ -182,18 +178,15 @@ public final class ServerInstance: Sendable {
         await context.scanner.enqueue(id)
     }
 
-    /// Stops listening, scanning and matching.
+    /// Stops listening and scanning, says goodbye on Bonjour and closes the router's port.
     public func stop() async {
         let running = tasks.withLockedValue { tasks in
             defer { tasks = [] }
             return tasks
         }
         running.forEach { $0.cancel() }
+        await context.advertising.stop()
+        await context.remoteAccess.stop()
         for task in running { await task.value }
-    }
-
-    /// This machine's addresses on its networks.
-    static func localAddresses() -> [String] {
-        []
     }
 }

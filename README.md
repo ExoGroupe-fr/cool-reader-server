@@ -139,7 +139,7 @@ swift build
 swift test
 ```
 
-Swift 6; SwiftNIO, swift-nio-ssl, swift-crypto and swift-certificates (Apple); SQLite. `Sources/CoolReaderKit/Core` holds the books, formats, names
+Swift 6.2 or later; SwiftNIO, swift-nio-ssl, swift-crypto and swift-certificates (Apple); SQLite. `Sources/CoolReaderKit/Core` holds the books, formats, names
 and catalogues and only uses Foundation; `Sources/CoolReaderKit/Server` holds the server.
 
 ## En français
