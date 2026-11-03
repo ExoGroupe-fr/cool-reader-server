@@ -31,7 +31,7 @@ nonisolated enum AdminRoutes {
             await context.setup.finish()
             Log.info("The admin account « \(name) » is created.")
             guard let user = context.store.user(id: id) else { throw HTTPError.notFound }
-            return signedIn(try context.issueToken(for: user, deviceName: browserName(request), kind: "web"), to: "/libraries")
+            return signedIn(try context.issueToken(for: user, deviceName: browserName(request), kind: "web"), to: "/libraries", request: request)
         }
 
         router.add(.GET, "/login") { request in
@@ -44,7 +44,7 @@ nonisolated enum AdminRoutes {
             let form = request.form
             do {
                 let user = try await context.signIn(name: form["name"] ?? "", password: form["password"] ?? "", from: request.remoteAddress)
-                return signedIn(try context.issueToken(for: user, deviceName: browserName(request), kind: "web"), to: "/")
+                return signedIn(try context.issueToken(for: user, deviceName: browserName(request), kind: "web"), to: "/", request: request)
             } catch let error as HTTPError {
                 return .html(loginPage(Strings(request.language), message: nil, error: error.message), status: error.status)
             }
@@ -360,10 +360,11 @@ nonisolated enum AdminRoutes {
         return nil
     }
 
-    private static func signedIn(_ token: String, to location: String) -> Response {
+    /// The session cookie; over HTTPS it never goes back over plain HTTP.
+    private static func signedIn(_ token: String, to location: String, request: Request) -> Response {
         var response = Response.redirect(location)
-        response.headers.add(name: "Set-Cookie",
-                             value: "\(ServerContext.sessionCookie)=\(token); Path=/; HttpOnly; SameSite=Strict; Max-Age=2592000")
+        response.headers.add(name: "Set-Cookie", value: "\(ServerContext.sessionCookie)=\(token); Path=/; HttpOnly; SameSite=Strict; "
+                                 + "Max-Age=2592000\(request.isSecure ? "; Secure" : "")")
         return response
     }
 
