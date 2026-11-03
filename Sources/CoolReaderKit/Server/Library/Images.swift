@@ -87,7 +87,7 @@ nonisolated final class Images: Sendable {
         let key = "remote-" + SHA256.hash(data: Data(url.absoluteString.utf8)).prefix(12).map { String(format: "%02x", $0) }.joined()
         if let image = cached(key, produce: { nil }) { return image }
         var request = URLRequest(url: url, timeoutInterval: 20)
-        request.setValue("CoolReaderServer/0.1 (+https://github.com/pookee/cool-reader-server)", forHTTPHeaderField: "User-Agent")
+        request.setValue("CoolReaderServer/0.1 (+https://github.com/ExoGroupe-fr/cool-reader-server)", forHTTPHeaderField: "User-Agent")
         guard let (data, response) = try? await URLSession.shared.data(for: request),
               (response as? HTTPURLResponse)?.statusCode ?? 200 < 400, !data.isEmpty else { return nil }
         return shrink ? cached(key) { data } : ImageData(data: data, contentType: "image/jpeg")

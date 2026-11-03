@@ -49,7 +49,7 @@ nonisolated enum DuckDNS {
         guard let url = requestURL(domain: domain, token: token, base: base) else { return .invalidDomain }
         var request = URLRequest(url: url, timeoutInterval: 10)
         request.cachePolicy = .reloadIgnoringLocalCacheData
-        request.setValue("CoolReaderServer/0.1 (+https://github.com/pookee/cool-reader-server)", forHTTPHeaderField: "User-Agent")
+        request.setValue("CoolReaderServer/0.1 (+https://github.com/ExoGroupe-fr/cool-reader-server)", forHTTPHeaderField: "User-Agent")
         guard let (data, response) = try? await URLSession.shared.data(for: request),
               (response as? HTTPURLResponse)?.statusCode == 200 else { return .noAnswer }
         return String(decoding: data, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix("OK") ? nil : .refused

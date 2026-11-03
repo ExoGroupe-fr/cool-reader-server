@@ -1,12 +1,12 @@
 <?xml version="1.0"?>
 <Container version="2">
   <Name>cool-reader-server</Name>
-  <Repository>ghcr.io/pookee/cool-reader-server:latest</Repository>
-  <Registry>https://github.com/pookee/cool-reader-server/pkgs/container/cool-reader-server</Registry>
+  <Repository>ghcr.io/exogroupe-fr/cool-reader-server:latest</Repository>
+  <Registry>https://github.com/ExoGroupe-fr/cool-reader-server/pkgs/container/cool-reader-server</Registry>
   <Network>host</Network>
   <Privileged>false</Privileged>
-  <Support>https://github.com/pookee/cool-reader-server/issues</Support>
-  <Project>https://github.com/pookee/cool-reader-server</Project>
+  <Support>https://github.com/ExoGroupe-fr/cool-reader-server/issues</Support>
+  <Project>https://github.com/ExoGroupe-fr/cool-reader-server</Project>
   <Overview>A home server for comics, manga and ebooks, in the spirit of Plex. Point it at your folders: it recognises the series, finds posters and synopses, and the people you invite read the libraries you choose in Cool Reader (iPhone, iPad), any OPDS reader or a browser. Free and open source, no account, no relay.</Overview>
   <Category>MediaServer:Books</Category>
   <WebUI>http://[IP]:7272/</WebUI>

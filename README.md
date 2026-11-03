@@ -41,7 +41,7 @@ machine and only reach the devices you pair.
 ### Mac
 
 Like Plex Media Server, a menu bar app runs the server on a Mac (macOS 14 or later). Download
-**Cool Reader Server.app** from the [releases](https://github.com/pookee/cool-reader-server/releases), put it in
+**Cool Reader Server.app** from the [releases](https://github.com/ExoGroupe-fr/cool-reader-server/releases), put it in
 Applications and open it: books appear in the menu bar. It shows the setup code at the first start, the libraries
 and the address to give your devices, and opens the admin pages. « Ajouter un dossier… » (or a folder dropped on
 the app's icon) adds a library, and « Ouvrir au démarrage du Mac » keeps it running. Data goes in
@@ -59,7 +59,7 @@ notarize the app, so it opens on any Mac.
 ```yaml
 services:
   cool-reader-server:
-    image: ghcr.io/pookee/cool-reader-server:latest
+    image: ghcr.io/exogroupe-fr/cool-reader-server:latest
     network_mode: host                         # Bonjour and remote access need the host's network
     volumes:
       - ./config:/config                       # database, cache, certificate, setup code

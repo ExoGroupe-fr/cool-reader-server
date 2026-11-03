@@ -144,7 +144,7 @@ nonisolated enum OpenLibraryClient {
     private static func get(_ url: URL) async throws -> Data {
         await pacer.wait()
         var request = URLRequest(url: url, timeoutInterval: 20)
-        request.setValue("CoolReaderServer/0.1 (+https://github.com/pookee/cool-reader-server)", forHTTPHeaderField: "User-Agent")
+        request.setValue("CoolReaderServer/0.1 (+https://github.com/ExoGroupe-fr/cool-reader-server)", forHTTPHeaderField: "User-Agent")
         let (data, response) = try await URLSession.shared.data(for: request)
         let status = (response as? HTTPURLResponse)?.statusCode ?? 200
         guard status < 400 else { throw BookCatalogError.http(service: "Open Library", status: status) }
