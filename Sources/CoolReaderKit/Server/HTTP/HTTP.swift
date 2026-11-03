@@ -227,7 +227,10 @@ nonisolated struct Router: Sendable {
             do {
                 return try await route.handler(routed)
             } catch let error as HTTPError {
-                return .error(error.status, error.message)
+                var response = Response.error(error.status, error.message)
+                // Sign-ins pause a quarter of an hour after too many wrong tries: say so.
+                if error.status == .tooManyRequests { response.headers.add(name: "Retry-After", value: "900") }
+                return response
             } catch {
                 return .error(.internalServerError, "Something went wrong on the server.")
             }

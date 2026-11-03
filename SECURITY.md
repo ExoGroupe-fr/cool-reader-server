@@ -22,7 +22,8 @@ reproduce it. You'll get an answer within a week.
   speak HTTPS to the outside.
 - **Accounts and devices.**
   - The first account needs the setup code shown on the server.
-  - Passwords are hashed with PBKDF2-HMAC-SHA256 (600,000 rounds), and wrong ones are throttled.
+  - Passwords are hashed with PBKDF2-HMAC-SHA256 (600,000 rounds). Wrong ones are throttled per address, so nobody
+    can lock a member out from elsewhere.
   - Each device gets its own token. Only its SHA-256 is stored, and the admin revokes it in one click.
   - An invitation works once, for one device, within two days (half an hour for an admin's own device). Only its
     SHA-256 is stored.

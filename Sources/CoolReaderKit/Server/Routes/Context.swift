@@ -172,9 +172,10 @@ nonisolated final class ServerContext: Sendable {
         return caller
     }
 
-    /// Checks a name and password, ten failures a quarter of an hour at most per address and per name.
+    /// Checks a name and password, ten failures a quarter of an hour at most per address, and per name from one address.
     func signIn(name: String, password: String, from address: String?) async throws -> UserRecord {
-        let keys = ["name:" + name.lowercased(), "address:" + (address ?? "?")]
+        // Per name from one address, and per address: wrong passwords tried elsewhere never lock a member out.
+        let keys = ["name:" + name.lowercased() + "@" + (address ?? "?"), "address:" + (address ?? "?")]
         guard await !throttle.isBlocked(keys) else {
             throw HTTPError(status: .tooManyRequests, message: "Too many attempts. Try again in a quarter of an hour.")
         }
