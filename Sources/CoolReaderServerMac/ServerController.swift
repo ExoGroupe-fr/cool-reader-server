@@ -174,7 +174,33 @@ final class ServerController {
         }
     }
 
+    // MARK: - Dock
+
+    var showsInDock = DockIcon.isShown {
+        didSet { DockIcon.isShown = showsInDock }
+    }
+
     func open(_ url: URL) {
         NSWorkspace.shared.open(url)
+    }
+}
+
+/// In the Dock as well as the menu bar, like an app one opens, unless the user turns it off: the icon then stays in
+/// the menu bar only. Kept in the app's preferences.
+@MainActor
+enum DockIcon {
+    private static let key = "ShowsInDock"
+
+    static var isShown: Bool {
+        get { UserDefaults.standard.object(forKey: key) as? Bool ?? true }
+        set {
+            UserDefaults.standard.set(newValue, forKey: key)
+            apply()
+        }
+    }
+
+    /// The Dock icon comes and goes with the activation policy; the menu bar's stays.
+    static func apply() {
+        NSApp.setActivationPolicy(isShown ? .regular : .accessory)
     }
 }

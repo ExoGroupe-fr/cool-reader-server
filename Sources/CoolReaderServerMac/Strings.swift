@@ -31,6 +31,8 @@ enum Strings {
         "openAdmin": ("Ouvrir l'administration", "Open Administration"),
         "addFolder": ("Ajouter un dossier…", "Add a Folder…"),
         "openAtLogin": ("Ouvrir au démarrage du Mac", "Open at Login"),
+        "showInDock": ("Afficher dans le Dock", "Show in Dock"),
+        "openInBrowser": ("Ouvrir dans le navigateur", "Open in Browser"),
         "allowLogin": ("Autoriser dans Réglages Système…", "Allow in System Settings…"),
         "showLog": ("Afficher le journal", "Show Log"),
         "showData": ("Afficher le dossier des données", "Show Data Folder"),
