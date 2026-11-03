@@ -6,3 +6,4 @@
 *.sqlite-shm
 *.sqlite-wal
 setup-code.txt
+/build/

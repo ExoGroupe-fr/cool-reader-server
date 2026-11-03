@@ -48,6 +48,24 @@ services:
 
 The image is published from version 0.1. Until then, build it from this repository: `docker build -t cool-reader-server .`
 
+### Mac app
+
+Like Plex Media Server, a menu bar app runs the server on a Mac (macOS 14 or later): it shows the setup code, the
+libraries and the address to give your devices, adds folders, and opens at login if you want. Build it with Xcode or
+its command line tools:
+
+```bash
+Scripts/build-mac-app.sh
+```
+
+Move `build/Cool Reader Server.app` to Applications and open it: books appear in the menu bar. A folder dropped on
+the app's icon becomes a library. Data goes in `~/Library/Application Support/Cool Reader Server`, the log in
+`~/Library/Logs/Cool Reader Server.log`.
+
+The script also zips the app for a GitHub release. It signs it ad hoc, for the Mac that built it; with
+`DEVELOPER_ID` (and `NOTARY_PROFILE`, a `notarytool` keychain profile) it signs it with a Developer ID and has Apple
+notarize it, so it opens on any Mac.
+
 ### macOS, from the source
 
 ```bash

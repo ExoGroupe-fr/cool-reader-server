@@ -182,6 +182,11 @@ public final class ServerInstance: Sendable {
         await context.scanner.enqueue(id)
     }
 
+    /// Whether a library is being scanned or waits for its turn.
+    public var isScanning: Bool {
+        get async { await context.scanner.isScanning }
+    }
+
     /// Stops listening, scanning and matching.
     public func stop() async {
         let running = tasks.withLockedValue { tasks in

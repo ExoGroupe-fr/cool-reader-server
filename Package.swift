@@ -32,3 +32,13 @@ let package = Package(
         .testTarget(name: "CoolReaderKitTests", dependencies: ["CoolReaderKit"]),
     ]
 )
+
+#if os(macOS)
+// The menu bar app, which runs the server in its own process (Scripts/build-mac-app.sh makes it an app). Linux and the
+// Docker build never see it.
+package.products.append(.executable(name: "CoolReaderServerMac", targets: ["CoolReaderServerMac"]))
+package.targets.append(.executableTarget(name: "CoolReaderServerMac", dependencies: [
+    "CoolReaderKit",
+    .product(name: "NIOCore", package: "swift-nio"),
+]))
+#endif
