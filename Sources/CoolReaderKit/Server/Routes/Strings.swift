@@ -121,6 +121,21 @@ nonisolated struct Strings: Sendable {
         "filterReading": ("En cours", "In progress"),
         "filterFinished": ("Lues", "Read"),
         "allGenres": ("Tous les genres", "All genres"),
+        "fixMatch": ("Corriger l'appariement…", "Fix the match…"),
+        "editSeries": ("Modifier le titre et le résumé", "Edit the title and synopsis"),
+        "rematch": ("Relancer l'appariement automatique", "Match automatically again"),
+        "unmatch": ("Ne garder aucune métadonnée", "Keep no metadata"),
+        "searchCatalogues": ("Chercher dans les catalogues", "Search the catalogues"),
+        "noCandidates": ("Aucun résultat dans les catalogues.", "No result in the catalogues."),
+        "customTitle": ("Titre", "Title"),
+        "customSummary": ("Résumé", "Synopsis"),
+        "customHint": ("Laissez un champ vide pour reprendre celui des catalogues.", "Leave a field empty to take the catalogues' back."),
+        "manualMatch": ("Choisie à la main", "Chosen by hand"),
+        "ignoredMatch": ("Aucune métadonnée, par votre choix.", "No metadata, as you chose."),
+        "notMatched": ("Aucun catalogue n'a reconnu cette série.", "No catalogue recognised this series."),
+        "matchedOn": ("Reconnue sur", "Recognised on"),
+        "choose": ("Choisir", "Choose"),
+        "chosen": ("Choisie", "Chosen"),
         "justAdded": ("Ajouté récemment", "Just added"),
         "seeSeries": ("Voir la série", "See the series"),
         "summaryFrom": ("Résumé :", "Synopsis:"),
@@ -231,6 +246,10 @@ nonisolated struct Strings: Sendable {
 
     func searchTitle(_ text: String) -> String {
         language == "fr" ? "Résultats pour « \(text) »" : "Results for \u{201C}\(text)\u{201D}"
+    }
+
+    func matchPageTitle(_ series: String) -> String {
+        language == "fr" ? "Métadonnées de « \(series) »" : "Metadata of \u{201C}\(series)\u{201D}"
     }
 
     func pageOf(_ page: Int, _ count: Int) -> String {

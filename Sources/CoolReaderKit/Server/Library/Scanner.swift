@@ -172,6 +172,15 @@ actor MetadataAgent {
         self.isEnabled = isEnabled
     }
 
+    /// What the matcher knows of a series: its folder, the admin's title, its kind, its authors from the .nfo or the
+    /// first book's ComicInfo, and its books.
+    static func input(for series: SeriesRecord, books: [BookRecord]) -> SeriesMatchInput {
+        let authors = series.nfo?.authors.isEmpty == false ? series.nfo!.authors : (books.first?.metadata?.writers ?? [])
+        return SeriesMatchInput(folderTitle: series.folderTitle, customTitle: series.customTitle, folderPath: series.folderPath,
+                                kind: series.kind, authors: authors,
+                                books: books.map { .init(key: String($0.id), fileName: $0.fileName, number: $0.number, format: $0.format) })
+    }
+
     func wake() {
         guard isEnabled, !isRunning else { return }
         isRunning = true
@@ -181,14 +190,11 @@ actor MetadataAgent {
     private func run() async {
         defer { isRunning = false }
         while let id = store.pendingSeries(limit: 1).first, let series = store.series(id: id) {
-            let books = store.books(seriesID: id)
-            let authors = series.nfo?.authors.isEmpty == false ? series.nfo!.authors : (books.first?.metadata?.writers ?? [])
-            let input = SeriesMatchInput(folderTitle: series.folderTitle, folderPath: series.folderPath, kind: series.kind,
-                                         authors: authors,
-                                         books: books.map { .init(key: String($0.id), fileName: $0.fileName, number: $0.number, format: $0.format) })
+            let input = Self.input(for: series, books: store.books(seriesID: id))
             do {
                 let match = try await SeriesMatcher.match(input)
-                try store.setMatch(seriesID: id, status: match == nil ? "unmatched" : "matched", match: match)
+                // The admin may have chosen a match while the catalogues were asked: theirs stays.
+                try store.setMatch(seriesID: id, status: match == nil ? "unmatched" : "matched", match: match, onlyIfPending: true)
                 Log.info("« \(series.folderTitle) »: \(match.map { "matched on \($0.source.rawValue)" } ?? "no convincing match").")
             } catch {
                 Log.warning("The catalogues can't be reached (\(error)); matching resumes at the next scan.")

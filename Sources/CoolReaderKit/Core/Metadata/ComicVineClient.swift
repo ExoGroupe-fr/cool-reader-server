@@ -35,6 +35,21 @@ nonisolated enum ComicVineClient {
         return parseVolumes(try await get(components.url!))
     }
 
+    /// One series by its id, as the admin chose it.
+    static func volume(id: Int) async throws -> Volume? {
+        guard let key else { return nil }
+        var components = URLComponents(string: "https://comicvine.gamespot.com/api/volume/4050-\(id)/")!
+        components.queryItems = [
+            URLQueryItem(name: "api_key", value: key), URLQueryItem(name: "format", value: "json"),
+            URLQueryItem(name: "field_list", value: "id,name,start_year,publisher,count_of_issues,image,deck,description,site_detail_url"),
+        ]
+        let data = try await get(components.url!)
+        // One object instead of a list.
+        guard let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any], let result = json["results"] else { return nil }
+        let wrapped = try JSONSerialization.data(withJSONObject: ["results": [result]])
+        return parseVolumes(wrapped).first
+    }
+
     /// The covers of a series' issues, by number.
     static func issueCovers(volumeID: Int) async throws -> [Double: URL] {
         guard let key else { return [:] }

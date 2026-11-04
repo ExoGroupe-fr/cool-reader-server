@@ -144,6 +144,7 @@ public final class ServerInstance: Sendable {
         AdminRoutes.add(to: &router, context: context)
         InvitationRoutes.add(to: &router, context: context)
         CollectionRoutes.add(to: &router, context: context)
+        SeriesAdminRoutes.add(to: &router, context: context)
         let routes = router
 
         let (listening, listener) = AsyncStream<Result<Int, any Error>>.makeStream()

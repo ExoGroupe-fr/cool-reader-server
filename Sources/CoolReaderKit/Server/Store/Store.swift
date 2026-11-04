@@ -25,9 +25,12 @@ nonisolated struct SeriesRecord: Sendable {
     var match: SeriesMatch?
     var addedAt: Date
     var bookCount: Int
+    /// The admin's own title and synopsis, over the catalogues' and the .nfo's.
+    var customTitle: String? = nil
+    var customSummary: String? = nil
 
-    var title: String { match?.title ?? nfo?.title ?? folderTitle }
-    var summary: String? { match?.summary ?? nfo?.summary }
+    var title: String { customTitle ?? match?.title ?? nfo?.title ?? folderTitle }
+    var summary: String? { customSummary ?? match?.summary ?? nfo?.summary }
     var authors: [String] { match?.authors.isEmpty == false ? match!.authors : (nfo?.authors ?? []) }
     var genres: [String] { match?.genres.isEmpty == false ? match!.genres : (nfo?.genres ?? []) }
     var year: Int? { match?.year ?? nfo?.year }
@@ -126,6 +129,13 @@ nonisolated final class Store: Sendable {
                 try database.execute("ALTER TABLE progress ADD COLUMN position TEXT")
                 try database.execute("ALTER TABLE progress ADD COLUMN fraction REAL")
                 try database.execute("PRAGMA user_version = 2")
+            }
+        }
+        if version < 3 {
+            try database.transaction {
+                try database.execute("ALTER TABLE series ADD COLUMN custom_title TEXT")
+                try database.execute("ALTER TABLE series ADD COLUMN custom_summary TEXT")
+                try database.execute("PRAGMA user_version = 3")
             }
         }
     }
@@ -351,10 +361,22 @@ nonisolated final class Store: Sendable {
             .compactMap { $0.int("id") }
     }
 
-    func setMatch(seriesID: Int, status: String, match: SeriesMatch?) throws {
+    /// pending, matched, unmatched, manual (the admin's choice, never redone by the matcher) or ignored (no match, by
+    /// the admin's choice). `onlyIfPending` leaves a series the admin settled in the meantime.
+    func setMatch(seriesID: Int, status: String, match: SeriesMatch?, onlyIfPending: Bool = false) throws {
         let json = match.flatMap { try? JSONEncoder().encode($0) }.map { String(decoding: $0, as: UTF8.self) }
-        try database.execute("UPDATE series SET match_status = ?, match_json = ?, matched_at = ? WHERE id = ?",
-                             [status, json, Date(), seriesID])
+        try database.execute("UPDATE series SET match_status = ?, match_json = ?, matched_at = ? WHERE id = ?"
+                             + (onlyIfPending ? " AND match_status = 'pending'" : ""), [status, json, Date(), seriesID])
+    }
+
+    /// Asks the matcher again for a series, its present match still shown meanwhile.
+    func rematch(seriesID: Int) throws {
+        try database.execute("UPDATE series SET match_status = 'pending' WHERE id = ?", [seriesID])
+    }
+
+    /// The admin's title and synopsis for a series; nil gives the catalogues' back.
+    func setCustom(seriesID: Int, title: String?, summary: String?) throws {
+        try database.execute("UPDATE series SET custom_title = ?, custom_summary = ? WHERE id = ?", [title, summary, seriesID])
     }
 
     func resetMatches(status: String) throws {
@@ -367,7 +389,8 @@ nonisolated final class Store: Sendable {
                      kind: UnitKind(rawValue: row.string("kind") ?? "") ?? .volume, posterPath: row.string("poster_path"),
                      bannerPath: row.string("banner_path"), nfo: row.json("nfo_json", as: NFOInfo.self),
                      matchStatus: row.string("match_status") ?? "pending", match: row.json("match_json", as: SeriesMatch.self),
-                     addedAt: row.date("added_at") ?? Date(), bookCount: row.int("book_count") ?? 0)
+                     addedAt: row.date("added_at") ?? Date(), bookCount: row.int("book_count") ?? 0,
+                     customTitle: row.string("custom_title"), customSummary: row.string("custom_summary"))
     }
 
     func books(seriesID: Int) -> [BookRecord] {

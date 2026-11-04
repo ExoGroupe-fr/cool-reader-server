@@ -116,6 +116,12 @@ nonisolated enum CollectionRoutes {
             let progress = context.store.progress(userID: caller.user.id, seriesID: series.id)
             var page = WebPage(title: series.title, strings: strings, caller: caller, libraries: context.store.visibleLibraries(for: caller.user), section: "/library/\(series.libraryID)")
             page.add(hero(series, books: books, progress: progress, strings: strings))
+            if caller.user.isAdmin {
+                page.add("""
+                    <p class="admin-tools"><a href="/series/\(series.id)/match">\(h(strings["fixMatch"]))</a>\
+                    <a href="/series/\(series.id)/match#edit">\(h(strings["editSeries"]))</a></p>
+                    """)
+            }
             let cards = books.map { book in
                 bookCard(book, series: series, progress: progress[book.id], strings: strings, showSeries: false, actions: true)
             }

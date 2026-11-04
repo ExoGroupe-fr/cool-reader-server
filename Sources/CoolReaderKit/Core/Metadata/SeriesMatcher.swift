@@ -94,6 +94,10 @@ nonisolated enum SeriesMatcher {
         let title = seriesTitle(for: series).title
         guard let results = try? await ComicVineClient.searchVolumes(title),
               let volume = ComicVineClient.best(results, for: title, highestNumber: series.books.compactMap(\.number).max()) else { return nil }
+        return await applyComicVine(volume, to: series)
+    }
+
+    static func applyComicVine(_ volume: ComicVineClient.Volume, to series: SeriesMatchInput) async -> SeriesMatch {
         var match = SeriesMatch(source: .comicVine)
         match.catalogID = "cv:\(volume.id)"
         match.title = TitleMatcher.similarity(volume.name, series.folderTitle) >= 0.75 ? volume.name : nil
@@ -111,7 +115,7 @@ nonisolated enum SeriesMatcher {
         return match
     }
 
-    private static func applyWikipedia(_ page: WikipediaClient.Summary, to series: SeriesMatchInput) -> SeriesMatch {
+    static func applyWikipedia(_ page: WikipediaClient.Summary, to series: SeriesMatchInput) -> SeriesMatch {
         var match = SeriesMatch(source: .wikipedia)
         let title = WikipediaClient.withoutQualifier(page.title)
         match.title = TitleMatcher.similarity(title, series.folderTitle) >= 0.85 ? title : nil
@@ -152,7 +156,7 @@ nonisolated enum SeriesMatcher {
             .max { $0.1 < $1.1 }?.0
     }
 
-    private static func apply(_ media: AniListMedia, to series: SeriesMatchInput, mangaDex: MangaDexClient.Manga? = nil) async -> SeriesMatch {
+    static func apply(_ media: AniListMedia, to series: SeriesMatchInput, mangaDex: MangaDexClient.Manga? = nil) async -> SeriesMatch {
         var match = SeriesMatch(source: .anilist)
         match.anilistID = media.id
         match.originalLanguage = media.originalLanguage
@@ -277,7 +281,7 @@ nonisolated enum SeriesMatcher {
         return BookMatcher.withoutSharedBooks(found, volumes: volumes)
     }
 
-    private static func applyBook(_ book: BookMatch, to series: SeriesMatchInput, volumes: [String: BookMatch] = [:]) async -> SeriesMatch {
+    static func applyBook(_ book: BookMatch, to series: SeriesMatchInput, volumes: [String: BookMatch] = [:]) async -> SeriesMatch {
         var match = SeriesMatch(source: book.source == .appleBooks ? .appleBooks : .openLibrary)
         var summary = book.summary
         if summary == nil, book.source == .openLibrary {

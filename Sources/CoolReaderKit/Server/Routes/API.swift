@@ -59,7 +59,7 @@ nonisolated enum APIRoutes {
         var genres: [String]
         var year: Int?
         var status: String?
-        /// pending, matched, unmatched or ignored.
+        /// pending, matched, unmatched, manual (chosen by the admin) or ignored.
         var matchStatus: String
         /// anilist, mangadex, appleBooks, openLibrary or wikipedia.
         var source: String?
