@@ -22,6 +22,7 @@ final class ServerController {
     private(set) var loginItem = SMAppService.mainApp.status
     private(set) var loginItemError: String?
 
+    let updater = Updater()
     let dataDirectory = AppPaths.data
     let logFile = AppPaths.log
     /// The port asked for: the one the server listens on, unless it couldn't start.

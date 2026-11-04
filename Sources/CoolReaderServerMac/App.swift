@@ -54,13 +54,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             source.resume()
             signalSources.append(source)
         }
-        Task { await controller.start() }
+        Task {
+            await controller.start()
+            askToOpenAtLogin()
+        }
+        controller.updater.checkDaily()
         Task {
             while !Task.isCancelled {
                 try? await Task.sleep(for: .seconds(60))
                 LogFile.rotateIfNeeded()
             }
         }
+    }
+
+    /// Once, at the first start: a server is of use when it runs, so the app offers to open with the Mac. The menu's
+    /// switch changes it later.
+    private func askToOpenAtLogin() {
+        let asked = "AskedToOpenAtLogin"
+        guard !UserDefaults.standard.bool(forKey: asked), !controller.opensAtLogin else { return }
+        UserDefaults.standard.set(true, forKey: asked)
+        let alert = NSAlert()
+        alert.messageText = Strings["openAtLoginQuestion"]
+        alert.informativeText = Strings["openAtLoginExplain"]
+        alert.addButton(withTitle: Strings["openAtLoginYes"])
+        alert.addButton(withTitle: Strings["notNow"])
+        NSApp.activate()
+        if alert.runModal() == .alertFirstButtonReturn { controller.opensAtLogin = true }
     }
 
     /// The Dock icon opens the site, as Plex Media Server opens Plex.

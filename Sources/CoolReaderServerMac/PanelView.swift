@@ -35,6 +35,7 @@ struct PanelView: View {
 
             Separator()
             VStack(spacing: 0) {
+                UpdateRow(updater: controller.updater)
                 Button { leave { controller.open(controller.adminURL) } } label: {
                     RowLabel(Strings["openAdmin"], systemImage: "globe")
                 }
@@ -270,6 +271,37 @@ private struct LoginItemRow: View {
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 4)
+    }
+}
+
+/// A newer version, when there is one, and its installation.
+private struct UpdateRow: View {
+    let updater: Updater
+
+    var body: some View {
+        switch updater.state {
+        case .idle:
+            EmptyView()
+        case .available(let release):
+            Button { Task { await updater.install() } } label: {
+                RowLabel(Strings.updateAvailable(release.version), systemImage: "arrow.down.circle")
+            }
+        case .installing:
+            HStack(spacing: 8) {
+                ProgressView().controlSize(.small).frame(width: 18, height: 16)
+                Text(Strings["installingUpdate"])
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+        case .failed(let message):
+            Text(Strings.updateFailed(message))
+                .font(.callout)
+                .foregroundStyle(.red)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+        }
     }
 }
 
