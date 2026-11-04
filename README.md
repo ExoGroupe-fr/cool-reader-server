@@ -14,13 +14,17 @@ machine and only reach the devices you pair.
 
 ## What it does
 
-- **Libraries** are folders on the server: `Mangas`, `BD`, `Romans`… It reads them and never changes them.
+- **Libraries** are folders on the server: `Mangas`, `BD`, `Romans`… It only reads them, unless you let admins
+  delete books, which then go to the Trash.
 - **Formats**: CBZ/ZIP, CBR/RAR (RAR 4 and 5, solid archives included), CB7/7z, CBT/TAR, EPUB, PDF — read by
   its own Swift decoders, the same as Cool Reader's.
 - **Series, recognised like in the app**: a folder is a series ("Dragon Ball/Dragon Ball T03.cbz"), loose files
   are grouped by name, ComicInfo.xml and `.nfo` files come first. Manga are matched on AniList then MangaDex,
-  books and BD on Apple Books then Open Library: poster, banner, synopsis, authors, genres, volume covers.
-  Only series titles are sent to those catalogues.
+  books and BD on Apple Books then Open Library, each album by its title or its number: poster, banner, synopsis,
+  authors, genres, volume covers. A series' own synopsis comes from Wikipedia in your language, and comics from
+  Comic Vine with a free key of your own. Only series titles are sent to those catalogues.
+- **Your hand on it**: an admin fixes a series' match from a search of the catalogues, or writes its title and
+  synopsis; the matcher never redoes it.
 - **Members** see the libraries you tick for them and keep their own reading progress, synced across their
   devices. A member can do without a password: an invitation is enough for Cool Reader.
 - **Invitations**: a QR code to scan with the iPhone's camera, or a link to send by message. Cool Reader opens,
@@ -32,8 +36,11 @@ machine and only reach the devices you pair.
   works too, and is never required.
 - **Bonjour**: Cool Reader finds the server on the home network by itself.
 - **In the browser**, in the spirit of Plex: a sidebar that goes from one library to the next, a home page that opens
-  on what you're reading and shows each library with its covers, what's new, search, and a reader for comics, manga
-  and PDFs that turns manga right to left and keeps your page in step with Cool Reader.
+  on what you're reading and shows each library with its covers, « À suivre » (the next volume of each series begun),
+  what's new, search by title, author or genre, filters, and a reader for comics, manga and PDFs: two pages side by
+  side on a wide screen, a vertical strip for webtoons, zoom, manga right to left, your page in step with Cool Reader.
+- **Admin from Cool Reader**, as from Plex's apps: libraries, members, invitations, devices and settings, through
+  the API in [docs/API.md](docs/API.md).
 - **OPDS 1.2** with page streaming: Panels, Chunky, KOReader or any OPDS reader can browse, download and read
   page by page.
 
@@ -45,7 +52,9 @@ Like Plex Media Server, a menu bar app runs the server on a Mac (macOS 14 or lat
 **Cool Reader Server.app** from the [releases](https://github.com/ExoGroupe-fr/cool-reader-server/releases), put it in
 Applications and open it: books appear in the menu bar, and the app in the Dock, where a click opens the site
 (« Afficher dans le Dock » takes it out). The menu shows the setup code at the first start, the libraries and the
-address to give your devices, and opens the admin pages. « Ajouter un dossier… » (or a folder dropped on
+address to give your devices, and opens the admin pages. At its first start it offers to open with the Mac, and it
+looks once a day for a new version, which its menu installs: signed by ExoGroupe and notarized by Apple, or not at
+all. « Ajouter un dossier… » (or a folder dropped on
 the app's icon) adds a library, and « Ouvrir au démarrage du Mac » keeps it running. Data goes in
 `~/Library/Application Support/Cool Reader Server`, the log in `~/Library/Logs/Cool Reader Server.log`.
 

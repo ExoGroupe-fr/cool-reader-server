@@ -140,6 +140,13 @@ nonisolated struct Strings: Sendable {
         "seeSeries": ("Voir la série", "See the series"),
         "summaryFrom": ("Résumé :", "Synopsis:"),
         "catalogues": ("Catalogues", "Catalogues"),
+        "files": ("Fichiers", "Files"),
+        "deletionIntro": ("Par défaut, le serveur ne fait que lire vos dossiers. Autorisée, la suppression d'un livre (par un admin, ici ou dans Cool Reader) envoie son fichier à la Corbeille du Mac, d'où il se remet en place ; ailleurs, dans un dossier caché .cool-reader-trash en tête de sa bibliothèque. Dans Docker, le dossier doit être monté en écriture.",
+                          "By default, the server only reads your folders. Allowed, deleting a book (by an admin, here or in Cool Reader) sends its file to the Mac's Trash, where it can be put back from; elsewhere, to a hidden .cool-reader-trash folder at the top of its library. In Docker, the folder must be mounted writable."),
+        "allowDeletion": ("Autoriser les admins à supprimer des livres", "Let admins delete books"),
+        "deleteBook": ("Supprimer", "Delete"),
+        "deleteBookTitle": ("Supprimer ce livre ?", "Delete this book?"),
+        "deleteBookConfirm": ("Envoyer à la corbeille", "Move to the Trash"),
         "comicVineIntro": ("Pour les comics : une clé Comic Vine gratuite (comicvine.gamespot.com/api) donne leur résumé et la couverture de chaque numéro. Sans clé, Comic Vine n'est jamais interrogé.",
                            "For comics: a free Comic Vine key (comicvine.gamespot.com/api) brings their synopsis and each issue's cover. Without a key, Comic Vine is never asked."),
         "comicVineKey": ("Clé Comic Vine", "Comic Vine key"),
@@ -253,6 +260,11 @@ nonisolated struct Strings: Sendable {
 
     func searchTitle(_ text: String) -> String {
         language == "fr" ? "Résultats pour « \(text) »" : "Results for \u{201C}\(text)\u{201D}"
+    }
+
+    func deleteBookIntro(_ name: String) -> String {
+        language == "fr" ? "« \(name) » part à la corbeille, d'où il peut être remis en place ; il disparaît de la bibliothèque et des appareils de chacun."
+                         : "\u{201C}\(name)\u{201D} goes to the Trash, where it can be put back from; it leaves the library and everyone's devices."
     }
 
     func matchPageTitle(_ series: String) -> String {

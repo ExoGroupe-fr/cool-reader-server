@@ -79,6 +79,31 @@ nonisolated enum SeriesAdminRoutes {
             return .redirect("/series/\(series.id)")
         }
 
+        router.add(.GET, "/books/:id/delete") { request in
+            let caller = try await AdminRoutes.adminPage(request, context)
+            let (book, series, _) = try context.visibleBook(request.parameter("id"), for: caller)
+            let strings = Strings(request.language)
+            guard context.allowsDeletion else { return .redirect("/server#files") }
+            let name = "\(series.title) · \(strings.bookTitle(book, kind: series.kind))"
+            var page = WebPage(title: strings["deleteBookTitle"], strings: strings, caller: caller,
+                               libraries: context.store.visibleLibraries(for: caller.user), section: "/library/\(series.libraryID)")
+            page.add("""
+                <div class="confirm"><img class="poster" src="/api/v1/books/\(book.id)/cover" alt="">
+                <div><h1>\(h(strings["deleteBookTitle"]))</h1><p>\(h(strings.deleteBookIntro(name)))</p>
+                <p class="hint"><code>\(h(book.fileName))</code> · \(h(strings.size(book.fileSize)))</p>
+                <form class="inline" method="post" action="/books/\(book.id)/delete"><button class="danger-fill">\(h(strings["deleteBookConfirm"]))</button>\
+                <a class="button quiet" href="/series/\(series.id)#book-\(book.id)">\(h(strings["cancel"]))</a></form></div></div>
+                """)
+            return .html(page.html)
+        }
+
+        router.add(.POST, "/books/:id/delete") { request in
+            let caller = try await AdminRoutes.adminAction(request, context)
+            let (book, series, _) = try context.visibleBook(request.parameter("id"), for: caller)
+            try context.delete(book)
+            return .redirect(context.store.series(id: series.id) != nil ? "/series/\(series.id)" : "/library/\(series.libraryID)")
+        }
+
         // The pages only load images from the server: a candidate's cover comes through it, from the catalogues alone.
         router.add(.GET, "/catalog-image") { request in
             _ = try await AdminRoutes.adminPage(request, context)

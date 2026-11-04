@@ -32,6 +32,12 @@ enum Strings {
         "addFolder": ("Ajouter un dossier…", "Add a Folder…"),
         "openAtLogin": ("Ouvrir au démarrage du Mac", "Open at Login"),
         "showInDock": ("Afficher dans le Dock", "Show in Dock"),
+        "installingUpdate": ("Installation de la mise à jour…", "Installing the update…"),
+        "openAtLoginQuestion": ("Ouvrir Cool Reader Server au démarrage du Mac ?", "Open Cool Reader Server when the Mac starts?"),
+        "openAtLoginExplain": ("Comme Plex Media Server, le serveur reste ainsi disponible pour vos appareils dès que le Mac est allumé. L'interrupteur « Ouvrir au démarrage du Mac » de son menu change d'avis à tout moment.",
+                               "Like Plex Media Server, the server is then there for your devices as soon as the Mac is on. The menu's « Open at Login » switch changes it at any time."),
+        "openAtLoginYes": ("Ouvrir au démarrage", "Open at Login"),
+        "notNow": ("Pas maintenant", "Not Now"),
         "openInBrowser": ("Ouvrir dans le navigateur", "Open in Browser"),
         "allowLogin": ("Autoriser dans Réglages Système…", "Allow in System Settings…"),
         "showLog": ("Afficher le journal", "Show Log"),
@@ -82,6 +88,14 @@ enum Strings {
 
     static func addFailed(_ name: String, _ detail: String) -> String {
         isFrench ? "« \(name) » n'a pas pu être ajoutée : \(detail)" : "“\(name)” couldn't be added: \(detail)"
+    }
+
+    static func updateAvailable(_ version: String) -> String {
+        isFrench ? "Installer la version \(version) et relancer" : "Install Version \(version) and Relaunch"
+    }
+
+    static func updateFailed(_ detail: String) -> String {
+        isFrench ? "La mise à jour n'a pas pu s'installer : \(detail)" : "The update couldn't be installed: \(detail)"
     }
 
     static func loginItemFailed(_ detail: String) -> String {

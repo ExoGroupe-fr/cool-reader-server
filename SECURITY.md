@@ -28,7 +28,8 @@ reproduce it. You'll get an answer within a week.
   - An invitation works once, for one device, within two days (half an hour for an admin's own device). Only its
     SHA-256 is stored.
 - **Access.** Every request checks that the member may see the library. Files are served by id, never by path.
-  Library folders are only read.
+  Library folders are only read, unless the admin allows deleting books: an admin's deletion then moves the file to
+  the Trash (or a hidden `.cool-reader-trash` folder in its library), never erases it.
 - **Web pages.** Forms from other sites are refused, the session cookie is HttpOnly and SameSite=Strict, and a
   strict content security policy applies.
 - **Remote access is off until you turn it on.** It opens one port on your router, the server's.

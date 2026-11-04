@@ -66,6 +66,12 @@ nonisolated enum InvitationRoutes {
                 <p class="hint">\(h(strings["remoteInvitationsHint"]))</p>
                 <button>\(h(strings["save"]))</button></form>
                 """)
+            page.add("""
+                <h2 id="files">\(h(strings["files"]))</h2><p class="hint">\(h(strings["deletionIntro"]))</p>
+                <form class="stack" method="post" action="/server/files">
+                <label class="check"><input type="checkbox" name="deletion"\(context.allowsDeletion ? " checked" : "")> \(h(strings["allowDeletion"]))</label>
+                <button>\(h(strings["save"]))</button></form>
+                """)
             let hasComicVineKey = ComicVineClient.key != nil
             page.add("""
                 <h2 id="catalogues">\(h(strings["catalogues"]))</h2><p class="hint">\(h(strings["comicVineIntro"]))</p>
@@ -111,25 +117,17 @@ nonisolated enum InvitationRoutes {
                 let value = (form[name] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
                 return value.isEmpty ? nil : value
             }
-            var settings = context.remoteSettings
-            settings.isEnabled = form["enabled"] != nil
-            if let port = field("port") {
-                guard let number = Int(port), (1...65535).contains(number) else { return .redirect("/server?error=badPort#remote") }
-                settings.externalPort = number
-            } else {
-                settings.externalPort = nil
+            if let problem = try await context.updateRemoteSettings(enabled: form["enabled"] != nil, port: field("port"), host: field("host"),
+                                                                    duckDNS: field("duckdns"), token: field("token")) {
+                return .redirect("/server?error=\(problem)#remote")
             }
-            settings.publicHost = field("host")
-            settings.duckDNSDomain = field("duckdns")
-            if let domain = settings.duckDNSDomain {
-                guard DuckDNS.subdomain(domain) != nil else { return .redirect("/server?error=badDuckDNS#remote") }
-                if let token = field("token") { settings.duckDNSToken = token }
-                guard settings.duckDNSToken != nil else { return .redirect("/server?error=duckDNSTokenMissing#remote") }
-            } else {
-                settings.duckDNSToken = nil
-            }
-            try await context.saveRemoteSettings(settings)
             return .redirect("/server?saved=1#remote")
+        }
+
+        router.add(.POST, "/server/files") { request in
+            _ = try await AdminRoutes.adminAction(request, context)
+            try context.setAllowsDeletion(request.form["deletion"] != nil)
+            return .redirect("/server?saved=1#files")
         }
     }
 
