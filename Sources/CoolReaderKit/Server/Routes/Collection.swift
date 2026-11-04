@@ -360,72 +360,216 @@ nonisolated enum CollectionRoutes {
 
     // MARK: - Reader
 
-    /// The reader: one page at a time, fitted to the window. Its settings ride on data attributes, since the page
-    /// only runs scripts from the server (/reader.js).
+    /// The reader: a page at a time, two side by side on a wide screen, or a vertical strip; its settings ride on data
+    /// attributes, since the page only runs scripts from the server (/reader.js).
     static func readerPage(book: BookRecord, series: SeriesRecord, count: Int, start: Int, next: BookRecord?, rightToLeft: Bool,
                            strings: Strings) -> String {
         let name = strings.bookTitle(book, kind: series.kind)
         let nextLink = next.map { "<a class=\"button\" href=\"/read/\($0.id)?page=0\">\(h(strings["nextBook"])) · \(h(strings.bookTitle($0, kind: series.kind)))</a>" } ?? ""
+        let layouts = [("auto", "Auto", "layoutAuto"), ("single", "1", "layoutSingle"), ("double", "2", "layoutDouble"), ("vertical", "↕", "layoutVertical")]
+            .map { "<button class=\"link\" data-layout=\"\($0.0)\" title=\"\(h(strings[$0.2]))\" aria-label=\"\(h(strings[$0.2]))\">\($0.1)</button>" }.joined()
         return WebPage.document(title: "\(series.title) · \(name)", language: strings.language, body: """
             <div id="reader" class="chrome" data-book="\(book.id)" data-count="\(count)" data-start="\(start)" data-rtl="\(rightToLeft ? "1" : "0")" data-back="/series/\(series.id)">
-            <img id="page" alt="">
+            <div id="view"><img id="page" alt=""><img id="page2" alt="" hidden></div><div id="strip" hidden></div>
             <div class="zones"><button class="zone" data-zone="left" aria-label="\(h(strings[rightToLeft ? "nextPage" : "previousPage"]))"></button>\
             <button class="zone" data-zone="middle" aria-label="\(h(strings["menu"]))"></button>\
             <button class="zone" data-zone="right" aria-label="\(h(strings[rightToLeft ? "previousPage" : "nextPage"]))"></button></div>
             <header class="bar top"><a class="back" href="/series/\(series.id)">‹ \(h(series.title))</a><span class="title">\(h(name))</span>\
-            <span id="counter"></span><button class="link" id="fullscreen">\(h(strings["fullScreen"]))</button></header>
+            <span id="counter"></span><span class="layouts" role="group" aria-label="\(h(strings["layout"]))">\(layouts)</span>\
+            <button class="link" id="zoom" title="\(h(strings["zoomHint"]))">\(h(strings["zoom"]))</button>\
+            <button class="link" id="fullscreen">\(h(strings["fullScreen"]))</button></header>
             <footer class="bar bottom"><input id="scrub" type="range" min="1" max="\(count)" step="1" dir="\(rightToLeft ? "rtl" : "ltr")" aria-label="\(h(strings["pages"]))"></footer>
             <div id="end" hidden><p>\(h(strings["endOfBook"]))</p><p class="inline">\(nextLink)<a class="button quiet" href="/series/\(series.id)">\(h(strings["backToSeries"]))</a></p></div>
             </div><script src="/reader.js?v=\(WebPage.version(of: readerScript))"></script>
             """, bodyClass: "reader-page")
     }
 
-    /// Turns pages with the arrows, a tap or click on either side, a swipe or the slider; keeps the next pages
-    /// loaded; saves the page on the server, where the member's other devices find it.
+    /// Turns pages with the arrows, a tap or click on either side, a swipe or the slider; shows two pages side by
+    /// side on a wide screen (the cover and wide pages alone, manga right to left), or every page in a vertical strip,
+    /// by itself when the pages are long strips (webtoons); zooms with a pinch of the trackpad, + and −, or the button,
+    /// and pans by dragging. Keeps the next pages loaded, and saves the page on the server, where the member's other
+    /// devices find it. The layout chosen stays in the browser.
     static let readerScript = """
     (function () {
       var root = document.getElementById('reader');
       var book = root.dataset.book, count = parseInt(root.dataset.count, 10), rtl = root.dataset.rtl === '1';
       var index = parseInt(root.dataset.start, 10) || 0;
-      var image = document.getElementById('page'), counter = document.getElementById('counter');
+      var view = document.getElementById('view'), left = document.getElementById('page'), right = document.getElementById('page2');
+      var strip = document.getElementById('strip'), counter = document.getElementById('counter');
       var scrub = document.getElementById('scrub'), end = document.getElementById('end');
       var width = Math.min(4000, Math.max(200, Math.round(Math.max(window.innerWidth, window.innerHeight) * (window.devicePixelRatio || 1))));
-      var loaded = {}, saving = null, hiding = null;
+      var loaded = {}, shape = {}, saving = null, hiding = null;
+      var preference = 'auto', mode = 'single', strips = false;
+      var zoom = 1, panX = 0, panY = 0;
+      try { preference = localStorage.getItem('crs.layout') || 'auto'; } catch (e) {}
+
       function source(i) { return '/api/v1/books/' + book + '/pages/' + i + '?width=' + width; }
-      function preload(i) { if (i >= 0 && i < count && !loaded[i]) { loaded[i] = new Image(); loaded[i].src = source(i); } }
-      function save() {
+      // A page is wide (a spread already), tall (a strip) or a page; learnt as it loads.
+      function learn(i, image) {
+        if (!image.naturalWidth || shape[i]) { return; }
+        var ratio = image.naturalHeight / image.naturalWidth;
+        shape[i] = ratio < 1 ? 'wide' : (ratio > 2.2 ? 'tall' : 'page');
+        if (shape[i] === 'tall' && !strips) { strips = true; if (preference === 'auto') { apply(); return; } }
+        if (mode === 'double' && shape[i] === 'wide') { render(); }
+      }
+      function preload(i) {
+        if (i < 0 || i >= count || loaded[i]) { return; }
+        var image = new Image();
+        loaded[i] = image;
+        image.onload = function () { learn(i, image); };
+        image.src = source(i);
+      }
+      function save(page) {
         clearTimeout(saving);
         saving = setTimeout(function () {
           fetch('/api/v1/books/' + book + '/progress', {
             method: 'PUT', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ page: index, finished: index >= count - 1, fraction: count > 1 ? index / (count - 1) : 1,
+            body: JSON.stringify({ page: page, finished: page >= count - 1, fraction: count > 1 ? page / (count - 1) : 1,
                                    updatedAt: new Date().toISOString() })
           }).catch(function () {});
         }, 700);
+      }
+      function chosenMode() {
+        if (preference !== 'auto') { return preference; }
+        if (strips) { return 'vertical'; }
+        return window.innerWidth >= 900 && window.innerWidth > window.innerHeight * 1.15 ? 'double' : 'single';
+      }
+      // The cover alone, then pages two by two; a wide page always alone.
+      function spreadOf(i) {
+        if (mode !== 'double' || i === 0) { return [i]; }
+        var page = 1;
+        while (page < count) {
+          var pair = shape[page] !== 'wide' && page + 1 < count && shape[page + 1] !== 'wide';
+          if (i === page || (pair && i === page + 1)) { return pair ? [page, page + 1] : [page]; }
+          page += pair ? 2 : 1;
+        }
+        return [i];
+      }
+      function render() {
+        var pages = spreadOf(index);
+        index = pages[0];
+        var a = pages[0], b = pages.length > 1 ? pages[1] : null;
+        resetZoom();
+        // Manga read right to left: the first page of a spread goes on the right.
+        left.src = source(b === null || !rtl ? a : b);
+        if (b === null) { right.hidden = true; right.removeAttribute('src'); } else { right.hidden = false; right.src = source(rtl ? a : b); }
+        view.classList.toggle('spread', b !== null);
+        var last = b === null ? a : b;
+        counter.textContent = (b === null ? (a + 1) : (a + 1) + '-' + (b + 1)) + ' / ' + count;
+        scrub.value = a + 1;
+        [a, b, last + 1, last + 2, last + 3, a - 1, a - 2].forEach(function (page) { if (page !== null) { preload(page); } });
+        save(last);
       }
       function show(i) {
         if (i < 0) { return; }
         if (i >= count) { end.hidden = false; return; }
         end.hidden = true;
         index = i;
-        image.src = source(i);
-        counter.textContent = (i + 1) + ' / ' + count;
-        scrub.value = i + 1;
-        preload(i + 1); preload(i + 2); preload(i - 1);
-        save();
+        if (mode === 'vertical') { var image = strip.children[i]; if (image) { image.scrollIntoView({ block: 'start' }); } return; }
+        render();
       }
-      function forward() { show(index + 1); }
-      function backward() { if (!end.hidden) { end.hidden = true; return; } show(index - 1); }
+      function forward() {
+        if (mode === 'vertical') { strip.scrollBy({ top: strip.clientHeight * 0.85, behavior: 'smooth' }); return; }
+        var pages = spreadOf(index);
+        show(pages[pages.length - 1] + 1);
+      }
+      function backward() {
+        if (!end.hidden) { end.hidden = true; return; }
+        if (mode === 'vertical') { strip.scrollBy({ top: -strip.clientHeight * 0.85, behavior: 'smooth' }); return; }
+        if (index > 0) { show(spreadOf(index - 1)[0]); }
+      }
+      // The strip: every page, loaded as it comes near; the page in the middle of the screen is the one read.
+      function buildStrip() {
+        if (strip.childElementCount) { return; }
+        for (var i = 0; i < count; i++) {
+          var image = document.createElement('img');
+          image.alt = ''; image.loading = 'lazy'; image.decoding = 'async'; image.src = source(i);
+          strip.appendChild(image);
+        }
+        var ticking = false;
+        strip.addEventListener('scroll', function () {
+          if (ticking) { return; }
+          ticking = true;
+          // A timer rather than an animation frame, which a hidden tab doesn't run.
+          setTimeout(function () {
+            ticking = false;
+            var middle = strip.clientHeight / 2, images = strip.children;
+            for (var k = 0; k < images.length; k++) {
+              var box = images[k].getBoundingClientRect();
+              if (box.top <= middle && box.bottom >= middle) {
+                if (k !== index) { index = k; counter.textContent = (k + 1) + ' / ' + count; scrub.value = k + 1; }
+                break;
+              }
+            }
+            var atEnd = strip.scrollTop + strip.clientHeight >= strip.scrollHeight - 4;
+            save(atEnd ? count - 1 : index);
+          }, 120);
+        });
+      }
+      function apply() {
+        mode = chosenMode();
+        root.dataset.mode = mode;
+        document.querySelectorAll('[data-layout]').forEach(function (button) {
+          button.setAttribute('aria-pressed', button.dataset.layout === preference ? 'true' : 'false');
+        });
+        if (mode === 'vertical') {
+          view.hidden = true; strip.hidden = false; buildStrip();
+          var image = strip.children[index]; if (image) { image.scrollIntoView({ block: 'start' }); }
+          counter.textContent = (index + 1) + ' / ' + count;
+        } else {
+          strip.hidden = true; view.hidden = false; render();
+        }
+      }
       function chrome(visible) {
         root.classList.toggle('chrome', visible);
         clearTimeout(hiding);
         if (visible) { hiding = setTimeout(function () { root.classList.remove('chrome'); }, 3500); }
       }
+      // Zoom: the page view scaled around a point, then dragged; the zones are off while it is zoomed.
+      function setZoom(value, x, y) {
+        var next = Math.min(4, Math.max(1, value));
+        if (x === undefined) { x = window.innerWidth / 2; y = window.innerHeight / 2; }
+        panX = x - (x - panX) * next / zoom; panY = y - (y - panY) * next / zoom;
+        zoom = next;
+        if (zoom === 1) { panX = 0; panY = 0; }
+        view.style.transform = zoom === 1 ? '' : 'translate(' + panX + 'px, ' + panY + 'px) scale(' + zoom + ')';
+        root.classList.toggle('zoomed', zoom > 1);
+      }
+      function resetZoom() { if (zoom !== 1) { setZoom(1); } }
+      view.style.transformOrigin = '0 0';
+      window.addEventListener('wheel', function (event) {
+        if (!event.ctrlKey || mode === 'vertical') { return; }
+        event.preventDefault();
+        setZoom(zoom * Math.exp(-event.deltaY / 120), event.clientX, event.clientY);
+      }, { passive: false });
+      var drag = null;
+      view.addEventListener('pointerdown', function (event) {
+        if (zoom === 1) { return; }
+        drag = { x: event.clientX - panX, y: event.clientY - panY };
+        view.setPointerCapture(event.pointerId);
+      });
+      view.addEventListener('pointermove', function (event) {
+        if (!drag) { return; }
+        panX = event.clientX - drag.x; panY = event.clientY - drag.y;
+        view.style.transform = 'translate(' + panX + 'px, ' + panY + 'px) scale(' + zoom + ')';
+      });
+      view.addEventListener('pointerup', function () { drag = null; });
+      view.addEventListener('dblclick', function () { resetZoom(); });
+      document.getElementById('zoom').addEventListener('click', function () { setZoom(zoom > 1 ? 1 : 2); chrome(true); });
+
       document.querySelectorAll('.zone').forEach(function (zone) {
         zone.addEventListener('click', function () {
           var side = zone.dataset.zone;
           if (side === 'middle') { chrome(!root.classList.contains('chrome')); return; }
           if ((side === 'right') !== rtl) { forward(); } else { backward(); }
+        });
+      });
+      strip.addEventListener('click', function () { chrome(!root.classList.contains('chrome')); });
+      document.querySelectorAll('[data-layout]').forEach(function (button) {
+        button.addEventListener('click', function () {
+          preference = button.dataset.layout;
+          try { localStorage.setItem('crs.layout', preference); } catch (e) {}
+          apply(); chrome(true);
         });
       });
       document.addEventListener('keydown', function (event) {
@@ -438,7 +582,13 @@ nonisolated enum CollectionRoutes {
           case 'Home': show(0); break;
           case 'End': show(count - 1); break;
           case 'f': toggleFullscreen(); break;
-          case 'Escape': if (!document.fullscreenElement) { location.href = root.dataset.back; } return;
+          case '+': case '=': setZoom(zoom * 1.5); break;
+          case '-': setZoom(zoom / 1.5); break;
+          case '0': setZoom(1); break;
+          case 'Escape':
+            if (zoom > 1) { setZoom(1); return; }
+            if (!document.fullscreenElement) { location.href = root.dataset.back; }
+            return;
           default: return;
         }
         event.preventDefault();
@@ -446,7 +596,7 @@ nonisolated enum CollectionRoutes {
       var startX = null;
       root.addEventListener('touchstart', function (event) { startX = event.touches.length === 1 ? event.touches[0].clientX : null; }, { passive: true });
       root.addEventListener('touchend', function (event) {
-        if (startX === null || event.changedTouches.length !== 1) { return; }
+        if (startX === null || event.changedTouches.length !== 1 || mode === 'vertical' || zoom > 1) { return; }
         var moved = event.changedTouches[0].clientX - startX;
         startX = null;
         if (Math.abs(moved) < 50) { return; }
@@ -459,7 +609,10 @@ nonisolated enum CollectionRoutes {
       }
       var fullscreen = document.getElementById('fullscreen');
       if (root.requestFullscreen) { fullscreen.addEventListener('click', toggleFullscreen); } else { fullscreen.hidden = true; }
-      show(Math.min(Math.max(index, 0), count - 1));
+      window.addEventListener('resize', function () { if (preference === 'auto' && chosenMode() !== mode) { apply(); } });
+      index = Math.min(Math.max(index, 0), count - 1);
+      preload(index);
+      apply();
       chrome(true);
     })();
     """

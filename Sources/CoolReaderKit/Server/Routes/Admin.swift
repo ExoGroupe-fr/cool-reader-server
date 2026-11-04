@@ -658,7 +658,19 @@ nonisolated struct WebPage {
     #invitation-link { width: 100%; max-width: 640px; font-size: 13px; margin-bottom: 4px; }
     body.reader-page { background: #000; overflow: hidden; }
     #reader { position: fixed; inset: 0; display: grid; place-items: center; background: #000; user-select: none; -webkit-user-select: none; }
-    #page { display: block; max-width: 100vw; max-height: 100vh; max-height: 100dvh; object-fit: contain; }
+    #view { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; will-change: transform; }
+    #view[hidden], #strip[hidden] { display: none; }
+    #view img { display: block; max-width: 100vw; max-height: 100vh; max-height: 100dvh; object-fit: contain; -webkit-user-drag: none; }
+    #view.spread img { max-width: 50vw; }
+    #reader.zoomed .zones { display: none; }
+    #reader.zoomed #view { cursor: grab; }
+    #strip { position: fixed; inset: 0; overflow-y: auto; display: flex; flex-direction: column; align-items: center; background: #000;
+      overscroll-behavior: contain; }
+    #strip img { display: block; width: min(100vw, 900px); height: auto; aspect-ratio: auto 2 / 3; }
+    #reader[data-mode="vertical"] .zones { display: none; }
+    .layouts { display: inline-flex; gap: 2px; }
+    .layouts button { padding: 2px 9px; border-radius: 6px; color: #bbb; }
+    .layouts button[aria-pressed="true"] { background: rgb(255 255 255 / 0.16); color: #fff; }
     .zones { position: fixed; inset: 0; display: grid; grid-template-columns: 1fr 1fr 1fr; }
     .zone { background: transparent; border: 0; border-radius: 0; padding: 0; margin: 0; cursor: pointer; -webkit-tap-highlight-color: transparent; }
     .zone:focus-visible { outline: none; }
