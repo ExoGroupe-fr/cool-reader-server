@@ -139,6 +139,14 @@ nonisolated final class Store: Sendable {
                 try database.execute("PRAGMA user_version = 3")
             }
         }
+        if version < 4 {
+            // The matcher learnt BD albums by number, Wikipedia's synopses and Comic Vine: every series it matched, or
+            // didn't, is looked up once more, its metadata shown meanwhile. The admin's choices stay.
+            try database.transaction {
+                try database.execute("UPDATE series SET match_status = 'pending' WHERE match_status IN ('matched', 'unmatched')")
+                try database.execute("PRAGMA user_version = 4")
+            }
+        }
     }
 
     private func createTables() throws {
