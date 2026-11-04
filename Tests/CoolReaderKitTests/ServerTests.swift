@@ -31,6 +31,38 @@ struct ServerTests {
         #expect(await router.handle(Self.request("/books/42")).status == .notFound)
     }
 
+    /// Unknown options are ignored: `--help` used to start a server, writing its database in `./config`.
+    @Test func printsHelpInsteadOfStarting() {
+        #expect(CoolReaderServerApp.asksForHelp(["cool-reader-server", "--help"]))
+        #expect(CoolReaderServerApp.asksForHelp(["cool-reader-server", "--config", "/tmp/x", "-h"]))
+        #expect(!CoolReaderServerApp.asksForHelp(["cool-reader-server", "--config", "/tmp/x"]))
+    }
+
+    /// A series the catalogues didn't find is looked up again when its files change, and only then.
+    @Test func looksASeriesUpAgainWhenItsFilesChange() async throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let comics = folder.appendingPathComponent("Comics")
+        try FileManager.default.createDirectory(at: comics.appendingPathComponent("Watchmen"), withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: folder.appendingPathComponent("config"), withIntermediateDirectories: true)
+        let file = comics.appendingPathComponent("Watchmen/WATCHMEN - Les Gardiens - Intégrale.cbz")
+        try TestZip.make([TestZip.File(name: "1.jpg", data: Data([1]))]).write(to: file)
+        var config = ServerConfig(configDirectory: folder.appendingPathComponent("config"))
+        config.onlineMetadata = false
+        let store = try Store(path: folder.appendingPathComponent("config/library.sqlite").path)
+        let library = try store.addLibrary(name: "Comics", path: comics.path)
+        let context = try ServerContext(config: config, store: store)
+        await context.scanner.scanNow(library)
+        let watchmen = try #require(store.series(libraryID: library).first)
+        try store.setMatch(seriesID: watchmen.id, status: "unmatched", match: nil)
+
+        await context.scanner.scanNow(library)
+        #expect(store.series(id: watchmen.id)?.matchStatus == "unmatched")
+        try FileManager.default.moveItem(at: file, to: comics.appendingPathComponent("Watchmen/Watchmen (Alan Moore).cbz"))
+        await context.scanner.scanNow(library)
+        #expect(store.series(id: watchmen.id)?.matchStatus == "pending")
+    }
+
     /// A library scanned into series, served to the admin, refused to a member without it, read over OPDS.
     @Test func servesLibrariesToTheMembersWhoSeeThem() async throws {
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)

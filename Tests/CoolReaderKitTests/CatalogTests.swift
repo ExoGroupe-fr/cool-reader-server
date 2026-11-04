@@ -20,6 +20,24 @@ struct CatalogTests {
         #expect(BookQuery.parse("La Gloire de mon père - Marcel Pagnol").author == "Marcel Pagnol")
     }
 
+    /// « Watchmen/WATCHMEN - Les Gardiens - Intégrale.cbr » found nothing: a book alone is now looked up without its
+    /// edition's words, then by its folder's name.
+    @Test func aBookAloneIsLookedUpByItsTitleThenByItsFolder() {
+        let book = SeriesMatchInput.Book(key: "1", fileName: "WATCHMEN - Les Gardiens - Intégrale.cbr", number: nil, format: .cbr)
+        let series = SeriesMatchInput(folderTitle: "Watchmen", folderPath: "Watchmen", kind: .book, books: [book])
+        let query = SeriesMatcher.bookQuery(for: series)
+        #expect(query.title == "WATCHMEN - Les Gardiens")
+        #expect(SeriesMatcher.folderQuery(for: series, besides: query).map(\.title) == ["Watchmen"])
+        // A loose file has no folder of its own, and a folder named like its book adds nothing.
+        let loose = SeriesMatchInput(folderTitle: "WATCHMEN - Les Gardiens", folderPath: nil, kind: .book, books: [book])
+        #expect(SeriesMatcher.folderQuery(for: loose, besides: query).isEmpty)
+        let named = SeriesMatchInput(folderTitle: "Watchmen", folderPath: "Watchmen", kind: .book,
+                                     books: [.init(key: "1", fileName: "Watchmen (Alan Moore).cbr", number: nil, format: .cbr)])
+        let namedQuery = SeriesMatcher.bookQuery(for: named)
+        #expect(namedQuery.title == "Watchmen" && namedQuery.author == "Alan Moore")
+        #expect(SeriesMatcher.folderQuery(for: named, besides: namedQuery).isEmpty)
+    }
+
     /// Apple Books in France sells the episodes in three parts, all titled "Pepper&Carrot", in this order.
     @Test func aSeriesTakesTheFirstEditionOfATitle() {
         let pool = [Self.edition(1531297659, "Pepper&Carrot", released: "2020-09-10T07:00:00Z"),

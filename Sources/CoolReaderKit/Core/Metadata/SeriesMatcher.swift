@@ -167,18 +167,16 @@ nonisolated enum SeriesMatcher {
         let books = series.books
         let query = bookQuery(for: series)
         let language = MetadataLocale.language
-        // A misspelt author in a file name ("Jules Vernes") can hide the book: then the title alone, the author
-        // still checked by the ranking.
-        let searches: [(source: BookMatch.Source, term: String?)] = [(.appleBooks, nil)]
-            + (query.author != nil ? [(.appleBooks, query.searchTitle)] : [])
-            + [(.openLibrary, nil)]
         guard books.count > 1 else {
-            for search in searches {
-                let results = search.source == .appleBooks
-                    ? try await AppleBooksClient.search(search.term ?? query.searchText)
-                    : try await OpenLibraryClient.search(title: query.searchTitle, author: query.author)
-                guard let found = BookMatcher.best(results, for: query, language: language) else { continue }
-                return await applyBook(found, to: series)
+            // The file's name first, then its folder's: "Watchmen/WATCHMEN - Les Gardiens - Intégrale.cbr".
+            for query in [query] + folderQuery(for: series, besides: query) {
+                for search in searches(for: query) {
+                    let results = search.source == .appleBooks
+                        ? try await AppleBooksClient.search(search.term ?? query.searchText)
+                        : try await OpenLibraryClient.search(title: query.searchTitle, author: query.author)
+                    guard let found = BookMatcher.best(results, for: query, language: language) else { continue }
+                    return await applyBook(found, to: series)
+                }
             }
             return nil
         }
@@ -188,7 +186,7 @@ nonisolated enum SeriesMatcher {
         var seriesQuery = query
         seriesQuery.number = 1
         let byVolume = series.kind != .chapter
-        for search in searches {
+        for search in searches(for: query) {
             let pool = search.source == .appleBooks
                 ? try await AppleBooksClient.search(search.term ?? query.searchText, limit: 50)
                 : try await OpenLibraryClient.search(title: query.searchTitle, author: query.author, limit: 30)
@@ -264,11 +262,19 @@ nonisolated enum SeriesMatcher {
 
     /// What to search a series by. A single book: its file name, which often holds the author
     /// ("Les Misérables - Victor Hugo.epub"). Several: the series' name and the author they share.
+    /// A misspelt author in a file name ("Jules Vernes") can hide the book: then the title alone, the author still
+    /// checked by the ranking.
+    private static func searches(for query: BookQuery) -> [(source: BookMatch.Source, term: String?)] {
+        [(.appleBooks, nil)] + (query.author != nil ? [(.appleBooks, query.searchTitle)] : []) + [(.openLibrary, nil)]
+    }
+
     static func bookQuery(for series: SeriesMatchInput) -> BookQuery {
         let books = series.books
         if books.count == 1, let book = books.first {
             var query = BookQuery.parse(baseName(of: book))
             if query.author == nil { query.author = series.authors.first }
+            // "WATCHMEN - Les Gardiens - Intégrale": an edition's words aren't the book's title, as for a series.
+            query.title = withoutEditionWords(query.title)
             return query
         }
         let authors = books.compactMap { BookQuery.parse(baseName(of: $0)).author }
@@ -306,12 +312,25 @@ nonisolated enum SeriesMatcher {
                 fromParent = true
             }
         }
-        // "Les Misérables Intégrale", "Saga Les Rougon-Macquart", "Astérix - Collection complète".
+        return (withoutEditionWords(name), fromParent)
+    }
+
+    /// The folder's name, for a book alone in its folder whose file name says something else. Nothing for a loose
+    /// file, whose series is named after it.
+    static func folderQuery(for series: SeriesMatchInput, besides query: BookQuery) -> [BookQuery] {
+        guard series.folderPath != nil else { return [] }
+        let title = seriesTitle(for: series).title
+        guard FileNameParser.normalized(title) != FileNameParser.normalized(query.title) else { return [] }
+        return [BookQuery(title: title, author: query.author)]
+    }
+
+    /// "Les Misérables Intégrale", "Saga Les Rougon-Macquart", "Astérix - Collection complète" → the title alone.
+    static func withoutEditionWords(_ name: String) -> String {
         let noise = #"(?i)\b(?:int[ée]grale|saga|collection|compl[eè]te?|coffret|cycle|the complete|box set|tomes?\s*\d+\s*(?:à|a|-|to)\s*\d+)\b"#
         let cleaned = name.replacingOccurrences(of: noise, with: "", options: .regularExpression)
             .split(whereSeparator: \.isWhitespace).joined(separator: " ")
             .trimmingCharacters(in: CharacterSet(charactersIn: " -,:"))
-        return (cleaned.isEmpty ? name : cleaned, fromParent)
+        return cleaned.isEmpty ? name : cleaned
     }
 
     private static func baseName(of book: SeriesMatchInput.Book) -> String {

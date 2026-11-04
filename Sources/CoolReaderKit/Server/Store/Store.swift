@@ -255,12 +255,16 @@ nonisolated final class Store: Sendable {
                           nfoJSON, now, now])
                 guard let seriesID = try database.first("SELECT id FROM series WHERE library_id = ? AND key = ?",
                                                         [libraryID, draft.key])?.int("id") else { continue }
+                var filesChanged = false
                 for (position, book) in draft.books.enumerated() {
                     let scanned = book.scanned
                     seen.insert(scanned.relativePath)
                     let exists = try database.first("SELECT id FROM books WHERE library_id = ? AND path = ?",
                                                     [libraryID, scanned.relativePath]) != nil
-                    if !exists { added += 1 }
+                    if !exists {
+                        added += 1
+                        filesChanged = true
+                    }
                     try database.execute("""
                         INSERT INTO books (series_id, library_id, path, file_name, format, file_size, modified_at, number, extra_title,
                             plain_name, position, added_at)
@@ -275,11 +279,13 @@ nonisolated final class Store: Sendable {
                     case .unchanged:
                         break
                     case .failed(let message):
+                        filesChanged = true
                         try database.execute("""
                             UPDATE books SET analysed = 1, analysis_error = ?, page_count = NULL, cover_path = NULL, pages_json = NULL,
                                 metadata_json = NULL WHERE library_id = ? AND path = ?
                             """, [message, libraryID, scanned.relativePath])
                     case .analysed(let analysis):
+                        filesChanged = true
                         let pages = (try? encoder.encode(analysis.pagePaths)).map { String(decoding: $0, as: UTF8.self) }
                         let metadata = analysis.metadata.flatMap { try? encoder.encode($0) }.map { String(decoding: $0, as: UTF8.self) }
                         try database.execute("""
@@ -287,6 +293,12 @@ nonisolated final class Store: Sendable {
                                 is_text = ?, metadata_json = ? WHERE library_id = ? AND path = ?
                             """, [analysis.pageCount, analysis.coverPath, pages, analysis.isText, metadata, libraryID, scanned.relativePath])
                     }
+                }
+                // A series the catalogues didn't know is looked up again when its files change: a book renamed
+                // after the first scan, or one more volume, may be what was missing.
+                if filesChanged {
+                    try database.execute("UPDATE series SET match_status = 'pending' WHERE id = ? AND match_status = 'unmatched'",
+                                         [seriesID])
                 }
             }
             for path in knownBooks(libraryID: libraryID).keys where !seen.contains(path) && !result.isInUnreadableFolder(path) {
