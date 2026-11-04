@@ -100,6 +100,14 @@ nonisolated enum APIRoutes {
         var books: [BookInfo]
     }
 
+    /// A book of "À suivre", with its series.
+    struct UpNextItem: Codable {
+        var book: BookInfo
+        var series: SeriesInfo
+    }
+
+    struct SeriesRead: Decodable { var read: Bool }
+
     struct Login: Decodable {
         var name: String
         var password: String
@@ -215,7 +223,25 @@ nonisolated enum APIRoutes {
         router.add(.GET, "/api/v1/search") { request in
             let caller = try await context.requireCaller(request)
             let text = request.query["q"] ?? ""
-            return .json(context.store.searchSeries(text, libraryIDs: context.visibleLibraryIDs(for: caller)).map(info))
+            let strings = Strings(request.language)
+            return .json(context.store.searchSeries(text, libraryIDs: context.visibleLibraryIDs(for: caller)) { [$0, strings.genre($0)] }
+                .map(info))
+        }
+
+        router.add(.GET, "/api/v1/upnext") { request in
+            let caller = try await context.requireCaller(request)
+            let books = context.store.upNext(userID: caller.user.id, libraryIDs: context.visibleLibraryIDs(for: caller), limit: 30)
+            return .json(books.compactMap { book in
+                context.store.series(id: book.seriesID).map { UpNextItem(book: info(book, progress: nil), series: info($0)) }
+            })
+        }
+
+        router.add(.POST, "/api/v1/series/:id/read") { request in
+            let caller = try await context.requireCaller(request)
+            let (series, _) = try context.visibleSeries(request.parameter("id"), for: caller)
+            try context.store.setSeriesRead(userID: caller.user.id, seriesID: series.id, read: try decode(SeriesRead.self, request).read)
+            let progress = context.store.progress(userID: caller.user.id, seriesID: series.id)
+            return .json(SeriesDetail(series: info(series), books: context.store.books(seriesID: series.id).map { info($0, progress: progress[$0.id]) }))
         }
 
         router.add(.GET, "/api/v1/series/:id") { request in

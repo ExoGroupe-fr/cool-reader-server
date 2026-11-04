@@ -575,6 +575,9 @@ nonisolated struct WebPage {
     .sort a { padding: 6px 14px; border-radius: 999px; color: var(--muted); text-decoration: none; font-size: 14px; background: rgb(255 255 255 / 0.07); }
     .sort a:hover { color: var(--ink); }
     .sort a[aria-current] { color: var(--bg); background: var(--ink); font-weight: 600; }
+    .filters { display: flex; flex-direction: column; gap: 10px; margin: -6px 0 24px; }
+    .sort.genres { flex-wrap: wrap; }
+    .sort.genres a { font-size: 13px; padding: 4px 12px; }
     @media (min-width: 861px) {
       .hero, .library-head { margin-top: calc(-8px - var(--topbar)); }
       .hero { padding-top: calc(var(--topbar) + 56px); }

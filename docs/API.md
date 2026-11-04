@@ -80,7 +80,8 @@ A member sees the libraries the admin gave them; anything else answers 404.
 | `GET /api/v1/libraries` | `[LibraryInfo]` |
 | `GET /api/v1/libraries/<id>/contents` | `{"library": LibraryInfo, "series": [SeriesInfo], "books": [BookInfo]}`, with an `ETag`: send it back in `If-None-Match` to get a bodiless 304 when nothing changed. The books come without progress. |
 | `GET /api/v1/libraries/<id>/series` | `[SeriesInfo]` |
-| `GET /api/v1/search?q=<text>` | `[SeriesInfo]` |
+| `GET /api/v1/search?q=<text>` | `[SeriesInfo]` whose title, folder, authors or genres (in English or in the request's language) hold the text |
+| `GET /api/v1/upnext` | `[{"book": BookInfo, "series": SeriesInfo}]`: in each series the member has finished a book of, the next one not begun, the series read last first |
 | `GET /api/v1/series/<id>` | `{"series": SeriesInfo, "books": [BookInfo]}`, books with progress |
 | `GET /api/v1/series/<id>/cover`, `/banner` | an image |
 | `GET /api/v1/books/<id>` | `BookInfo` with progress |
@@ -142,6 +143,9 @@ Per member, for every device they use.
 - `updatedAt` is when it was read, and defaults to now. The server keeps the newer of what it has and what it gets,
   so a device that read offline can send its progress later.
 - The answer is the stored `ProgressInfo`.
+
+**`POST /api/v1/series/<id>/read`** with `{"read": true}` marks every book of the series read at its last page, or unread
+with `false`, as of now; the answer is `{"series": SeriesInfo, "books": [BookInfo]}` with the new progress.
 
 **`GET /api/v1/progress?since=<date>`**
 

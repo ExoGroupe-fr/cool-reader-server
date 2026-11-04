@@ -335,10 +335,15 @@ nonisolated final class Store: Sendable {
         return rows.map(series(from:))
     }
 
-    func searchSeries(_ text: String, libraryIDs: [Int]) -> [SeriesRecord] {
+    /// Series whose title, folder, authors or genres hold the text; `genreNames` adds a genre's names in the member's
+    /// language ("Aventure" for "Adventure").
+    func searchSeries(_ text: String, libraryIDs: [Int], genreNames: (String) -> [String] = { [$0] }) -> [SeriesRecord] {
         let wanted = FileNameParser.normalized(text)
         guard !wanted.isEmpty else { return [] }
-        return libraryIDs.flatMap { series(libraryID: $0) }.filter { FileNameParser.normalized($0.title).contains(wanted) }
+        return libraryIDs.flatMap { series(libraryID: $0) }.filter { series in
+            let fields = [series.title, series.folderTitle] + series.authors + series.genres.flatMap(genreNames)
+            return fields.contains { FileNameParser.normalized($0).contains(wanted) }
+        }
     }
 
     func pendingSeries(limit: Int) -> [Int] {
@@ -525,12 +530,54 @@ nonisolated final class Store: Sendable {
         return rows.map(book(from:)).compactMap { book in progress(userID: userID, bookID: book.id).map { (book, $0) } }
     }
 
+    /// "À suivre", like Plex's On Deck: in each series a member has finished a book of, the next one they haven't
+    /// begun, the series read last first. A book already begun is in "Reprendre la lecture" instead.
+    func upNext(userID: Int, libraryIDs: [Int], limit: Int) -> [BookRecord] {
+        guard !libraryIDs.isEmpty else { return [] }
+        let marks = libraryIDs.map { _ in "?" }.joined(separator: ",")
+        let arguments: [(any SQLBindable)?] = [userID] + libraryIDs.map { $0 as (any SQLBindable)? }
+        let rows = (try? database.query("""
+            SELECT b.series_id AS series_id, MAX(p.updated_at) AS last FROM progress p JOIN books b ON b.id = p.book_id
+            WHERE p.user_id = ? AND p.finished = 1 AND b.library_id IN (\(marks)) GROUP BY b.series_id ORDER BY last DESC
+            """, arguments)) ?? []
+        var next: [BookRecord] = []
+        for seriesID in rows.compactMap({ $0.int("series_id") }) where next.count < limit {
+            let read = progress(userID: userID, seriesID: seriesID)
+            let books = books(seriesID: seriesID)
+            guard let lastFinished = books.lastIndex(where: { read[$0.id]?.finished == true }),
+                  let book = books[(lastFinished + 1)...].first(where: { read[$0.id]?.finished != true }) else { continue }
+            if let started = read[book.id], started.page > 0 || (started.fraction ?? 0) > 0 { continue }
+            next.append(book)
+        }
+        return next
+    }
+
+    /// Marks every book of a series read (at its last page) or unread, as now: a member's devices take it up.
+    func setSeriesRead(userID: Int, seriesID: Int, read: Bool) throws {
+        let now = Date()
+        try database.transaction {
+            for book in books(seriesID: seriesID) {
+                try setProgress(userID: userID, ProgressRecord(bookID: book.id, page: read ? max(0, (book.pageCount ?? 1) - 1) : 0,
+                                                               finished: read, position: nil, fraction: read ? 1 : 0, updatedAt: now))
+            }
+        }
+    }
+
     /// A member's progress in the books of a series, by book.
     func progress(userID: Int, seriesID: Int) -> [Int: ProgressRecord] {
         let rows = (try? database.query("""
             SELECT p.* FROM progress p JOIN books b ON b.id = p.book_id WHERE p.user_id = ? AND b.series_id = ?
             """, [userID, seriesID])) ?? []
         return Dictionary(rows.map(progress(from:)).map { ($0.bookID, $0) }, uniquingKeysWith: { $1 })
+    }
+
+    /// The series a member has begun: a book finished or opened past its first page.
+    func startedSeries(userID: Int) -> Set<Int> {
+        let rows = (try? database.query("""
+            SELECT DISTINCT b.series_id AS series_id FROM progress p JOIN books b ON b.id = p.book_id
+            WHERE p.user_id = ? AND (p.finished = 1 OR p.page > 0 OR p.fraction > 0)
+            """, [userID])) ?? []
+        return Set(rows.compactMap { $0.int("series_id") })
     }
 
     /// How many books of each series a member finished, by series.

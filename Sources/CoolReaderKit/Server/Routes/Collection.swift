@@ -48,6 +48,11 @@ nonisolated enum CollectionRoutes {
                 return bookCard(item.book, series: series, progress: item.progress, strings: strings, showSeries: true)
             }
             if !readingCards.isEmpty { page.add(shelf(strings["continueReading"], cards: readingCards, strings: strings)) }
+            let nextCards = context.store.upNext(userID: caller.user.id, libraryIDs: libraries.map(\.id), limit: 20).compactMap { book -> String? in
+                guard let series = context.store.series(id: book.seriesID) else { return nil }
+                return bookCard(book, series: series, progress: nil, strings: strings, showSeries: true)
+            }
+            if !nextCards.isEmpty { page.add(shelf(strings["upNext"], cards: nextCards, strings: strings)) }
             if libraries.count > 1, !recent.isEmpty {
                 page.add(shelf(strings["recent"], cards: recent.map { seriesCard($0, finished: finished[$0.id] ?? 0, strings: strings) },
                                strings: strings))
@@ -81,6 +86,8 @@ nonisolated enum CollectionRoutes {
                 """)
             if byDate { series.sort { $0.addedAt > $1.addedAt } }
             let finished = context.store.finishedCounts(userID: caller.user.id)
+            page.add(filterBar(series, library: library, request: request, strings: strings))
+            series = filtered(series, request: request, finished: finished, started: context.store.startedSeries(userID: caller.user.id))
             page.add(series.isEmpty ? "<p class=\"empty\">\(h(strings["noSeries"]))</p>"
                                     : grid(series.map { seriesCard($0, finished: finished[$0.id] ?? 0, strings: strings) }))
             return .html(page.html)
@@ -92,7 +99,7 @@ nonisolated enum CollectionRoutes {
             let text = (request.query["q"] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
             var page = WebPage(title: strings["search"], strings: strings, caller: caller, libraries: context.store.visibleLibraries(for: caller.user), search: text)
             page.add("<h1>\(h(text.isEmpty ? strings["search"] : strings.searchTitle(text)))</h1>")
-            let results = context.store.searchSeries(text, libraryIDs: context.visibleLibraryIDs(for: caller))
+            let results = context.store.searchSeries(text, libraryIDs: context.visibleLibraryIDs(for: caller)) { [$0, strings.genre($0)] }
             let finished = context.store.finishedCounts(userID: caller.user.id)
             if !text.isEmpty {
                 page.add(results.isEmpty ? "<p class=\"empty\">\(h(strings["noResults"]))</p>"
@@ -112,7 +119,12 @@ nonisolated enum CollectionRoutes {
             let cards = books.map { book in
                 bookCard(book, series: series, progress: progress[book.id], strings: strings, showSeries: false, actions: true)
             }
-            page.add("<h2>\(h(strings.bookCount(books.count, kind: series.kind)))</h2>")
+            let allRead = !books.isEmpty && books.allSatisfy { progress[$0.id]?.finished == true }
+            page.add("""
+                <div class="row-head"><h2>\(h(strings.bookCount(books.count, kind: series.kind)))</h2>\
+                <form method="post" action="/series/\(series.id)/read"><input type="hidden" name="read" value="\(allRead ? "0" : "1")">\
+                <button class="link">\(h(strings[allRead ? "markSeriesUnread" : "markSeriesRead"]))</button></form></div>
+                """)
             page.add(grid(cards, wide: true))
             if books.contains(where: \.isText) { page.add("<p class=\"hint\">\(h(strings["textBooksHint"]))</p>") }
             return .html(page.html)
@@ -130,6 +142,14 @@ nonisolated enum CollectionRoutes {
             return .html(readerPage(book: book, series: series, count: count, start: min(max(wanted, 0), count - 1), next: next,
                                     rightToLeft: isRightToLeft(book, series: series, library: context.store.library(id: book.libraryID)),
                                     strings: strings))
+        }
+
+        router.add(.POST, "/series/:id/read") { request in
+            try AdminRoutes.checkOrigin(request)
+            let caller = try await context.requireCaller(request)
+            let (series, _) = try context.visibleSeries(request.parameter("id"), for: caller)
+            try context.store.setSeriesRead(userID: caller.user.id, seriesID: series.id, read: request.form["read"] == "1")
+            return .redirect("/series/\(series.id)")
         }
 
         // Marking a book read or unread writes progress the member's devices pick up, rather than deleting it.
@@ -193,6 +213,44 @@ nonisolated enum CollectionRoutes {
                 """
         }
         return "<section class=\"row-section\"><div class=\"row-head\"><h2>\(h(strings["yourLibraries"]))</h2></div><div class=\"tiles\">\(tiles.joined())</div></section>"
+    }
+
+    /// A library's series by reading state (all, not begun, begun, read) and genre, as the page's address asks.
+    static func filtered(_ series: [SeriesRecord], request: Request, finished: [Int: Int], started: Set<Int>) -> [SeriesRecord] {
+        var series = series
+        switch request.query["state"] {
+        case "unread": series = series.filter { !started.contains($0.id) }
+        case "reading": series = series.filter { started.contains($0.id) && (finished[$0.id] ?? 0) < $0.bookCount }
+        case "read": series = series.filter { $0.bookCount > 0 && (finished[$0.id] ?? 0) >= $0.bookCount }
+        default: break
+        }
+        if let genre = request.query["genre"], !genre.isEmpty { series = series.filter { $0.genres.contains(genre) } }
+        return series
+    }
+
+    /// The reading states, then the library's most frequent genres, as links that keep the other choices.
+    static func filterBar(_ series: [SeriesRecord], library: LibraryRecord, request: Request, strings: Strings) -> String {
+        let state = request.query["state"] ?? ""
+        let genre = request.query["genre"] ?? ""
+        func link(state: String, genre: String, label: String, current: Bool) -> String {
+            var query: [String] = []
+            if let sort = request.query["sort"] { query.append("sort=\(sort)") }
+            if !state.isEmpty { query.append("state=\(state)") }
+            if !genre.isEmpty { query.append("genre=\(genre.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? genre)") }
+            let href = "/library/\(library.id)" + (query.isEmpty ? "" : "?" + query.joined(separator: "&"))
+            return "<a href=\"\(h(href))\"\(current ? " aria-current=\"true\"" : "")>\(h(label))</a>"
+        }
+        let states = [("", "filterAll"), ("unread", "filterUnread"), ("reading", "filterReading"), ("read", "filterFinished")]
+            .map { link(state: $0.0, genre: genre, label: strings[$0.1], current: state == $0.0) }
+        var counts: [String: Int] = [:]
+        for item in series { for name in item.genres { counts[name, default: 0] += 1 } }
+        let genres = counts.sorted { $0.value != $1.value ? $0.value > $1.value : $0.key < $1.key }.prefix(10).map(\.key)
+        var html = "<div class=\"filters\"><p class=\"sort\">\(states.joined())</p>"
+        if !genres.isEmpty {
+            html += "<p class=\"sort genres\">" + link(state: state, genre: "", label: strings["allGenres"], current: genre.isEmpty)
+                + genres.map { link(state: state, genre: $0, label: strings.genre($0), current: genre == $0) }.joined() + "</p>"
+        }
+        return html + "</div>"
     }
 
     static func grid(_ cards: [String], wide: Bool = false) -> String {
