@@ -123,7 +123,8 @@ nonisolated enum CollectionRoutes {
                     """)
             }
             let cards = books.map { book in
-                bookCard(book, series: series, progress: progress[book.id], strings: strings, showSeries: false, actions: true)
+                bookCard(book, series: series, progress: progress[book.id], strings: strings, showSeries: false, actions: true,
+                         canDelete: caller.user.isAdmin && context.allowsDeletion)
             }
             let allRead = !books.isEmpty && books.allSatisfy { progress[$0.id]?.finished == true }
             page.add("""
@@ -279,7 +280,7 @@ nonisolated enum CollectionRoutes {
 
     /// A book's cover, with how much of it is read; on a series' page, its download and read marks too.
     static func bookCard(_ book: BookRecord, series: SeriesRecord, progress: ProgressRecord?, strings: Strings, showSeries: Bool,
-                         actions: Bool = false) -> String {
+                         actions: Bool = false, canDelete: Bool = false) -> String {
         let read = fraction(progress, book: book)
         let readable = isReadableOnline(book)
         let href = readable ? "/read/\(book.id)" : "/api/v1/books/\(book.id)/file"
@@ -303,7 +304,8 @@ nonisolated enum CollectionRoutes {
             tools = """
                 <span class="tools"><a href="/api/v1/books/\(book.id)/file" title="\(h(strings["download"])) · \(h(strings.size(book.fileSize)))">\(h(strings["download"]))</a>\
                 <form method="post" action="/books/\(book.id)/read"><input type="hidden" name="read" value="\(finished ? "0" : "1")">\
-                <button class="link">\(h(strings[finished ? "markUnread" : "markRead"]))</button></form></span>
+                <button class="link">\(h(strings[finished ? "markUnread" : "markRead"]))</button></form>\
+                \(canDelete ? "<a class=\"danger\" href=\"/books/\(book.id)/delete\">\(h(strings["deleteBook"]))</a>" : "")</span>
                 """
         }
         return """

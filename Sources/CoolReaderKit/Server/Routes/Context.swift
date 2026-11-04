@@ -58,6 +58,30 @@ nonisolated final class ServerContext: Sendable {
         await remoteAccess.update(settings)
     }
 
+    /// The admin's remote access settings, checked first: the key of the problem when one is wrong (badPort,
+    /// badDuckDNS, duckDNSTokenMissing), nothing saved then. A token left out keeps the saved one.
+    func updateRemoteSettings(enabled: Bool, port: String?, host: String?, duckDNS: String?, token: String?) async throws -> String? {
+        var settings = remoteSettings
+        settings.isEnabled = enabled
+        if let port {
+            guard let number = Int(port), (1...65535).contains(number) else { return "badPort" }
+            settings.externalPort = number
+        } else {
+            settings.externalPort = nil
+        }
+        settings.publicHost = host
+        settings.duckDNSDomain = duckDNS
+        if let domain = settings.duckDNSDomain {
+            guard DuckDNS.subdomain(domain) != nil else { return "badDuckDNS" }
+            if let token { settings.duckDNSToken = token }
+            guard settings.duckDNSToken != nil else { return "duckDNSTokenMissing" }
+        } else {
+            settings.duckDNSToken = nil
+        }
+        try await saveRemoteSettings(settings)
+        return nil
+    }
+
     /// The public addresses the settings name, without asking the router: for invitations made from the command
     /// line, while the running server may be the one that opened the port.
     var configuredPublicEndpoints: [String] {
@@ -65,6 +89,45 @@ nonisolated final class ServerContext: Sendable {
         let port = settings.externalPort ?? config.port
         let hosts = [settings.publicHost, settings.duckDNSDomain.flatMap(DuckDNS.host)].compactMap { $0 }.filter { !$0.isEmpty }
         return hosts.map { RemoteAccess.endpoint($0, port: port) }
+    }
+
+    // MARK: - Deleting books
+
+    static let deletionSetting = "allow_deletion"
+
+    /// Off until the admin turns it on: libraries are only read otherwise.
+    var allowsDeletion: Bool { store.setting(Self.deletionSetting) == "1" }
+
+    func setAllowsDeletion(_ allowed: Bool) throws {
+        try store.setSetting(Self.deletionSetting, allowed ? "1" : "0")
+    }
+
+    /// Sends a book's file to the Trash, where it can be put back from, then forgets it. Throws when deleting is off, or
+    /// when the library can't be written (a Docker folder mounted read-only).
+    func delete(_ book: BookRecord) throws {
+        guard allowsDeletion else {
+            throw HTTPError(status: .forbidden, message: "Deleting books is off: turn it on in the server's settings.")
+        }
+        guard let root = root(of: book.libraryID) else { throw HTTPError.notFound }
+        let file = root.appendingPathComponent(book.path)
+        do {
+            #if os(macOS)
+            if config.systemTrash {
+                try FileManager.default.trashItem(at: file, resultingItemURL: nil)
+                try store.removeBook(id: book.id)
+                Log.info("« \(book.fileName) » went to the Trash.")
+                return
+            }
+            #endif
+            let trash = root.appendingPathComponent(".cool-reader-trash").appendingPathComponent(book.path)
+            try FileManager.default.createDirectory(at: trash.deletingLastPathComponent(), withIntermediateDirectories: true)
+            if FileManager.default.fileExists(atPath: trash.path) { try FileManager.default.removeItem(at: trash) }
+            try FileManager.default.moveItem(at: file, to: trash)
+        } catch {
+            throw HTTPError(status: .conflict, message: "The file can't be moved: the library may be read-only (\(error.localizedDescription)).")
+        }
+        try store.removeBook(id: book.id)
+        Log.info("« \(book.fileName) » went to .cool-reader-trash in its library.")
     }
 
     // MARK: - Catalogues

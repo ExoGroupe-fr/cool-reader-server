@@ -375,6 +375,16 @@ nonisolated final class Store: Sendable {
         try database.execute("UPDATE series SET match_status = 'pending' WHERE id = ?", [seriesID])
     }
 
+    /// Forgets a book whose file is gone, and its series when it was the last one.
+    func removeBook(id: Int) throws {
+        guard let book = book(id: id) else { return }
+        try database.transaction {
+            try database.execute("DELETE FROM books WHERE id = ?", [id])
+            try database.execute("DELETE FROM series WHERE id = ? AND NOT EXISTS (SELECT 1 FROM books b WHERE b.series_id = series.id)",
+                                 [book.seriesID])
+        }
+    }
+
     /// The admin's title and synopsis for a series; nil gives the catalogues' back.
     func setCustom(seriesID: Int, title: String?, summary: String?) throws {
         try database.execute("UPDATE series SET custom_title = ?, custom_summary = ? WHERE id = ?", [title, summary, seriesID])

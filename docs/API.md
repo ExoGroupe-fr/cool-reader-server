@@ -109,7 +109,7 @@ A member sees the libraries the admin gave them; anything else answers 404.
 | `kind` | `volume`, `chapter`, `issue` or `book` |
 | `status` | `finished`, `ongoing`, `upcoming`, `cancelled` or `hiatus` |
 | `genres` | in English |
-| `matchStatus` | `pending`, `matched`, `unmatched` or `ignored` |
+| `matchStatus` | `pending`, `matched`, `unmatched`, `manual` (chosen by the admin) or `ignored` |
 | `source` | `anilist`, `mangadex`, `appleBooks`, `openLibrary`, `comicVine` or `wikipedia` |
 | `summarySource`, `summaryURL` | `wikipedia` and the article's address when the synopsis comes from Wikipedia: show both, the text is under CC BY-SA |
 
@@ -157,6 +157,71 @@ with `false`, as of now; the answer is `{"series": SeriesInfo, "books": [BookInf
 ```json
 {"bookID": 4, "page": 12, "finished": false, "position": "…", "fraction": 0.25, "updatedAt": "2026-11-03T10:00:00Z"}
 ```
+
+## Administration
+
+For Cool Reader signed in as an admin, what the web admin does, as Plex's apps do. Every call needs an admin's
+token; a member gets 403. Bodies left without a field keep what is there.
+
+### Libraries
+
+| Call | Answer |
+|---|---|
+| `GET /api/v1/admin/libraries` | `[AdminLibrary]` |
+| `POST /api/v1/admin/libraries` with `{"name": "BD", "path": "/libraries/BD"}` | `AdminLibrary`, scanned at once; 400 when the folder isn't on the server or is a library already |
+| `POST /api/v1/admin/libraries/<id>/scan` | `{"status": "scanning"}` |
+| `DELETE /api/v1/admin/libraries/<id>` | `{"status": "removed"}`: the server forgets it, the folder stays as it is |
+
+**AdminLibrary:** `{"id", "name", "path", "seriesCount", "bookCount", "lastScanAt", "lastError"}`, `lastError` being
+`unreachable` when the folder couldn't be read (its books are kept).
+
+### Members, invitations, devices
+
+| Call | Answer |
+|---|---|
+| `GET /api/v1/admin/members` | `[Member]` |
+| `POST /api/v1/admin/members` with `{"name", "password"?, "allLibraries"?, "libraryIDs"?}` | `{"member": Member, "invitation": Invitation}`; without a password the member only gets in with the invitation |
+| `PATCH /api/v1/admin/members/<id>` with `{"allLibraries"?, "libraryIDs"?, "password"?}` | `Member`; an admin's libraries don't change |
+| `DELETE /api/v1/admin/members/<id>` | `{"status": "removed"}`; 403 for the admin |
+| `POST /api/v1/admin/members/<id>/invitations` | `Invitation`: two days for a member, half an hour for the admin's own device |
+| `GET /api/v1/admin/invitations` | `[Invitation]` still open, without their link (only its hash is kept) |
+| `DELETE /api/v1/admin/invitations/<id>` | `{"status": "removed"}` |
+| `GET /api/v1/admin/devices` | `[{"id", "memberID", "memberName", "name", "kind", "createdAt", "lastSeenAt"}]` |
+| `DELETE /api/v1/admin/devices/<id>` | `{"status": "revoked"}`: its token gets 401 |
+| `POST /api/v1/admin/pairings/approve` with `{"code": "482715", "memberID": 2}` | `{"device": "Léa's iPad"}`, the device of `POST /api/v1/pair`; 404 for a code no device shows |
+
+**Member:** `{"id", "name", "isAdmin", "allLibraries", "libraryIDs", "hasPassword"}`.
+**Invitation:** `{"id", "memberID", "memberName", "link", "expiresAt"}`, `link` being the `coolreader://connect?…` link,
+given once when it is made.
+
+### Server
+
+- `GET /api/v1/admin/server` → `{"name", "version", "addresses", "allowDeletion", "comicVineKeySet", "scanning",
+  "pendingMatches", "remoteAccess": {"enabled", "port", "host", "duckDNSDomain", "duckDNSTokenSet"}, "remoteStatus"}`,
+  `remoteStatus` being where remote access stands (`state`: `off`, `working`, `open`, `manual` or `failed`, with
+  `problem`, `publicAddress`, `externalPort`…).
+- `PATCH /api/v1/admin/server` with `{"name"?, "allowDeletion"?, "comicVineKey"?, "remoteAccess"?: {"enabled"?, "port"?,
+  "host"?, "duckDNSDomain"?, "duckDNSToken"?}}` → the same. `comicVineKey: ""` removes the key; in `remoteAccess`,
+  `port: 0` and empty strings clear a field, and the token is only ever sent. 400 with the problem when a setting is wrong.
+
+### A series' metadata
+
+| Call | Answer |
+|---|---|
+| `GET /api/v1/admin/series/<id>/candidates?q=<text>` | `[{"source", "id", "title", "detail", "year", "coverURL", "summary"}]` from AniList, Apple Books, Open Library, Comic Vine (with a key) and Wikipedia; `q` is the series' title when left out |
+| `POST /api/v1/admin/series/<id>/match` with `{"source": "appleBooks", "id": "ab:631320051"}` | `{"series": SeriesInfo, "books": [BookInfo]}`, matched by hand (`matchStatus` `manual`), which the matcher never redoes |
+| `POST /api/v1/admin/series/<id>/rematch` | the same, the matcher asked again (`pending`) |
+| `POST /api/v1/admin/series/<id>/unmatch` | the same, without metadata (`ignored`) |
+| `PATCH /api/v1/admin/series/<id>` with `{"title"?, "summary"?}` | the same; the admin's title and synopsis win over the catalogues' and stay through a new match, `""` gives theirs back |
+
+### Deleting books
+
+Off until the admin turns it on (`allowDeletion`); the server otherwise only reads the libraries.
+
+| Call | Answer |
+|---|---|
+| `DELETE /api/v1/admin/books/<id>` | `{"status": "deleted"}`: the file goes to the Mac's Trash, or elsewhere to a hidden `.cool-reader-trash` folder at the top of its library, and leaves the library; 403 while deleting is off, 409 when the file can't be moved (a read-only Docker folder) |
+| `DELETE /api/v1/admin/series/<id>` | the same for every book of the series |
 
 ## OPDS
 

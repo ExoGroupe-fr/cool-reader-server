@@ -18,6 +18,9 @@ nonisolated struct ServerConfig: Sendable {
     /// "host:port" addresses that devices reach this server at, for invitations: needed in Docker's bridge network,
     /// where the container doesn't know the host's address (`--address nas.local:7272`, COOLREADER_ADDRESSES).
     var publishedAddresses: [String] = []
+    /// Deleted books go to the system's Trash where there is one (macOS); else, and in tests, to a hidden
+    /// ".cool-reader-trash" folder at the top of their library, which scans skip.
+    var systemTrash = true
 
     static func load(arguments: [String], environment: [String: String]) -> ServerConfig {
         var config = ServerConfig(configDirectory: URL(fileURLWithPath: environment["COOLREADER_CONFIG"] ?? "config", isDirectory: true))

@@ -643,7 +643,10 @@ nonisolated struct WebPage {
     button, .button { font: inherit; font-weight: 600; border: 0; border-radius: 8px; padding: 9px 16px; background: var(--accent);
       color: var(--accent-ink); cursor: pointer; text-decoration: none; display: inline-block; }
     button.quiet, .button.quiet { background: transparent; color: var(--ink); border: 1px solid var(--line); font-weight: 500; }
-    button.danger { color: var(--danger); }
+    button.danger, .tools a.danger { color: var(--danger); }
+    button.danger-fill { background: #d9503f; color: #fff; }
+    .confirm { display: grid; grid-template-columns: 160px 1fr; gap: 28px; align-items: start; max-width: 760px; margin-top: 24px; }
+    @media (max-width: 620px) { .confirm { grid-template-columns: 1fr; } .confirm .poster { max-width: 140px; } }
     button.link { background: none; color: var(--muted); padding: 0; font-weight: 400; }
     .status { color: var(--muted); min-height: 1.5em; margin: 0 0 8px; }
     .empty, .hint { color: var(--muted); }
