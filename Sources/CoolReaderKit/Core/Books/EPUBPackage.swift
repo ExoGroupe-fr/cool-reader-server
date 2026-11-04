@@ -129,6 +129,38 @@ nonisolated enum EPUBText {
         plainText(fromHTML: html).filter { !$0.isWhitespace }.count
     }
 
+    private static let namedEntities: [String: String] = [
+        "nbsp": " ", "lt": "<", "gt": ">", "quot": "\"", "apos": "'", "rsquo": "’", "lsquo": "‘", "rdquo": "”", "ldquo": "“",
+        "laquo": "«", "raquo": "»", "hellip": "…", "ndash": "–", "mdash": "—", "eacute": "é", "egrave": "è", "ecirc": "ê",
+        "euml": "ë", "agrave": "à", "acirc": "â", "ccedil": "ç", "icirc": "î", "iuml": "ï", "ocirc": "ô", "ugrave": "ù",
+        "ucirc": "û", "oelig": "œ", "Eacute": "É", "Agrave": "À", "copy": "©", "reg": "®", "trade": "™", "deg": "°",
+    ]
+
+    /// "&#xa0;", "&#233;", "&eacute;": store texts carry all three. "&amp;" last, so "&amp;lt;" stays "&lt;".
+    static func decodingEntities(_ text: String) -> String {
+        guard text.contains("&") else { return text }
+        let pattern = try! NSRegularExpression(pattern: "&(#[xX][0-9a-fA-F]{1,6}|#[0-9]{1,7}|[A-Za-z]{2,8});")
+        var result = ""
+        var last = text.startIndex
+        for match in pattern.matches(in: text, range: NSRange(text.startIndex..., in: text)) {
+            guard let whole = Range(match.range, in: text), let name = Range(match.range(at: 1), in: text) else { continue }
+            let entity = String(text[name])
+            var replacement: String?
+            if entity.hasPrefix("#x") || entity.hasPrefix("#X") {
+                replacement = UInt32(entity.dropFirst(2), radix: 16).flatMap(Unicode.Scalar.init).map { String(Character($0)) }
+            } else if entity.hasPrefix("#") {
+                replacement = UInt32(entity.dropFirst()).flatMap(Unicode.Scalar.init).map { String(Character($0)) }
+            } else {
+                replacement = namedEntities[entity]
+            }
+            guard let replacement else { continue }
+            result += text[last..<whole.lowerBound] + replacement
+            last = whole.upperBound
+        }
+        result += text[last...]
+        return result.replacingOccurrences(of: "&amp;", with: "&")
+    }
+
     static func plainText(fromHTML html: String) -> String {
         var text = html
         for block in ["head", "style", "script"] {
@@ -137,8 +169,7 @@ nonisolated enum EPUBText {
         text = text.replacingOccurrences(of: "<br\\s*/?>", with: "\n", options: [.regularExpression, .caseInsensitive])
         text = text.replacingOccurrences(of: "</p>", with: "\n", options: [.caseInsensitive])
         text = text.replacingOccurrences(of: "<[^>]+>", with: " ", options: .regularExpression)
-        let entities = ["&nbsp;": " ", "&amp;": "&", "&lt;": "<", "&gt;": ">", "&quot;": "\"", "&#39;": "'", "&apos;": "'", "&rsquo;": "’", "&hellip;": "…"]
-        for (entity, value) in entities { text = text.replacingOccurrences(of: entity, with: value) }
+        text = decodingEntities(text)
         return text
             .components(separatedBy: "\n")
             .map { $0.components(separatedBy: .whitespaces).filter { !$0.isEmpty }.joined(separator: " ") }

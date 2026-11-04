@@ -68,6 +68,13 @@ struct CatalogTests {
         #expect(found["40"] == nil)
     }
 
+    /// Apple Books' synopses carry numeric entities: "Le Papyrus de César,&#xa0;signé Didier Conrad".
+    @Test func storeTextsLoseTheirEntities() {
+        #expect(EPUBText.plainText(fromHTML: "César,&#xa0;signé&#160;Conrad : l&#39;album &eacute;tait «&#x2009;culte&#x2009;»")
+                == "César, signé Conrad : l'album était « culte »")
+        #expect(EPUBText.plainText(fromHTML: "Pepper&amp;Carrot &amp;lt;b&amp;gt; &unknown; &") == "Pepper&Carrot &lt;b&gt; &unknown; &")
+    }
+
     @Test func readsWikipediaSummaries() throws {
         let json = #"""
             {"type": "standard", "title": "Astérix", "description": "série française de bandes dessinées",

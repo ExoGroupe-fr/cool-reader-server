@@ -30,7 +30,8 @@ nonisolated struct SeriesRecord: Sendable {
     var customSummary: String? = nil
 
     var title: String { customTitle ?? match?.title ?? nfo?.title ?? folderTitle }
-    var summary: String? { customSummary ?? match?.summary ?? nfo?.summary }
+    /// Entities decoded here too, for the synopses kept before the store's were.
+    var summary: String? { (customSummary ?? match?.summary ?? nfo?.summary).map(EPUBText.decodingEntities) }
     var authors: [String] { match?.authors.isEmpty == false ? match!.authors : (nfo?.authors ?? []) }
     var genres: [String] { match?.genres.isEmpty == false ? match!.genres : (nfo?.genres ?? []) }
     var year: Int? { match?.year ?? nfo?.year }
