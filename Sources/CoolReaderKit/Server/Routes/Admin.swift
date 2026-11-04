@@ -507,6 +507,10 @@ nonisolated struct WebPage {
     .hero::after { content: ""; position: absolute; inset: 0; z-index: -1;
       background: linear-gradient(90deg, rgb(14 14 16 / 0.82), rgb(14 14 16 / 0.25) 55%, rgb(14 14 16 / 0)),
                   linear-gradient(to bottom, rgb(14 14 16 / 0) 35%, var(--bg)); }
+    .hero.covers .mosaic { top: -40px; left: -4%; width: 125%; flex-wrap: wrap; opacity: 0.5; }
+    .hero.covers .mosaic img { width: 138px; }
+    .hero.covers::after { background: linear-gradient(90deg, rgb(14 14 16 / 0.92), rgb(14 14 16 / 0.6) 55%, rgb(14 14 16 / 0.35)),
+                                      linear-gradient(to bottom, rgb(14 14 16 / 0) 30%, var(--bg)); }
     .hero-body { position: relative; display: grid; grid-template-columns: minmax(130px, 230px) 1fr; gap: 30px; align-items: end; max-width: 1400px; }
     .poster { width: 100%; border-radius: 12px; box-shadow: 0 16px 40px rgb(0 0 0 / 0.6); background: var(--raised); }
     .overline { margin: 0 0 8px; font-size: 12px; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; color: var(--accent-2); }
@@ -522,6 +526,8 @@ nonisolated struct WebPage {
       background: rgb(255 255 255 / 0.12); border: 1px solid rgb(255 255 255 / 0.16); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); }
     .button.glass:hover { background: rgb(255 255 255 / 0.2); }
     .summary { max-width: 72ch; white-space: pre-line; margin: 0; color: #e2ddd6; }
+    .credit { margin: 8px 0 0; font-size: 12px; color: var(--faint); }
+    .credit a { color: var(--muted); }
     .hero.spotlight { display: flex; align-items: flex-end; min-height: min(64vh, 580px); border-radius: 0 0 26px 26px; }
     .spotlight .hero-body { width: 100%; grid-template-columns: minmax(120px, 210px) 1fr; }
     .spotlight .summary { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; white-space: normal; }
@@ -569,6 +575,9 @@ nonisolated struct WebPage {
     .sort a { padding: 6px 14px; border-radius: 999px; color: var(--muted); text-decoration: none; font-size: 14px; background: rgb(255 255 255 / 0.07); }
     .sort a:hover { color: var(--ink); }
     .sort a[aria-current] { color: var(--bg); background: var(--ink); font-weight: 600; }
+    .filters { display: flex; flex-direction: column; gap: 10px; margin: -6px 0 24px; }
+    .sort.genres { flex-wrap: wrap; }
+    .sort.genres a { font-size: 13px; padding: 4px 12px; }
     @media (min-width: 861px) {
       .hero, .library-head { margin-top: calc(-8px - var(--topbar)); }
       .hero { padding-top: calc(var(--topbar) + 56px); }
@@ -613,6 +622,21 @@ nonisolated struct WebPage {
     .choices { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: center; border: 0; padding: 0; margin: 0; }
     label { display: flex; flex-direction: column; gap: 6px; font-size: 14px; color: var(--muted); }
     label.check { flex-direction: row; align-items: center; gap: 6px; color: var(--ink); }
+    textarea { font: inherit; color: var(--ink); background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 9px 11px;
+      resize: vertical; }
+    .admin-tools { display: flex; flex-wrap: wrap; gap: 6px 18px; margin: -4px 0 4px; font-size: 14px; }
+    .admin-tools a, .back a { color: var(--muted); text-decoration: none; }
+    .admin-tools a:hover, .back a:hover { color: var(--ink); }
+    .back { margin: 4px 0 0; font-size: 14px; }
+    .candidates { display: flex; flex-direction: column; gap: 10px; margin: 8px 0 12px; }
+    .candidate { display: grid; grid-template-columns: 64px 1fr auto; gap: 14px; align-items: center; padding: 10px 12px; border-radius: 12px;
+      background: var(--surface); border: 1px solid var(--line); }
+    .candidate.current { border-color: rgb(232 100 63 / 0.7); }
+    .candidate .art { width: 64px; }
+    .candidate .art img { aspect-ratio: 2 / 3; }
+    .candidate .what { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+    .candidate .excerpt { font-size: 13px; color: var(--muted); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+    .no-cover { display: grid; place-items: center; aspect-ratio: 2 / 3; color: var(--faint); }
     input, select { font: inherit; color: var(--ink); background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 9px 11px; }
     input.code { font-variant-numeric: tabular-nums; letter-spacing: 0.2em; max-width: 12ch; }
     input:focus, select:focus, button:focus-visible, a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
@@ -634,7 +658,19 @@ nonisolated struct WebPage {
     #invitation-link { width: 100%; max-width: 640px; font-size: 13px; margin-bottom: 4px; }
     body.reader-page { background: #000; overflow: hidden; }
     #reader { position: fixed; inset: 0; display: grid; place-items: center; background: #000; user-select: none; -webkit-user-select: none; }
-    #page { display: block; max-width: 100vw; max-height: 100vh; max-height: 100dvh; object-fit: contain; }
+    #view { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; will-change: transform; }
+    #view[hidden], #strip[hidden] { display: none; }
+    #view img { display: block; max-width: 100vw; max-height: 100vh; max-height: 100dvh; object-fit: contain; -webkit-user-drag: none; }
+    #view.spread img { max-width: 50vw; }
+    #reader.zoomed .zones { display: none; }
+    #reader.zoomed #view { cursor: grab; }
+    #strip { position: fixed; inset: 0; overflow-y: auto; display: flex; flex-direction: column; align-items: center; background: #000;
+      overscroll-behavior: contain; }
+    #strip img { display: block; width: min(100vw, 900px); height: auto; aspect-ratio: auto 2 / 3; }
+    #reader[data-mode="vertical"] .zones { display: none; }
+    .layouts { display: inline-flex; gap: 2px; }
+    .layouts button { padding: 2px 9px; border-radius: 6px; color: #bbb; }
+    .layouts button[aria-pressed="true"] { background: rgb(255 255 255 / 0.16); color: #fff; }
     .zones { position: fixed; inset: 0; display: grid; grid-template-columns: 1fr 1fr 1fr; }
     .zone { background: transparent; border: 0; border-radius: 0; padding: 0; margin: 0; cursor: pointer; -webkit-tap-highlight-color: transparent; }
     .zone:focus-visible { outline: none; }

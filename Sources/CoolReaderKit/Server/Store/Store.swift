@@ -25,9 +25,13 @@ nonisolated struct SeriesRecord: Sendable {
     var match: SeriesMatch?
     var addedAt: Date
     var bookCount: Int
+    /// The admin's own title and synopsis, over the catalogues' and the .nfo's.
+    var customTitle: String? = nil
+    var customSummary: String? = nil
 
-    var title: String { match?.title ?? nfo?.title ?? folderTitle }
-    var summary: String? { match?.summary ?? nfo?.summary }
+    var title: String { customTitle ?? match?.title ?? nfo?.title ?? folderTitle }
+    /// Entities decoded here too, for the synopses kept before the store's were.
+    var summary: String? { (customSummary ?? match?.summary ?? nfo?.summary).map(EPUBText.decodingEntities) }
     var authors: [String] { match?.authors.isEmpty == false ? match!.authors : (nfo?.authors ?? []) }
     var genres: [String] { match?.genres.isEmpty == false ? match!.genres : (nfo?.genres ?? []) }
     var year: Int? { match?.year ?? nfo?.year }
@@ -126,6 +130,13 @@ nonisolated final class Store: Sendable {
                 try database.execute("ALTER TABLE progress ADD COLUMN position TEXT")
                 try database.execute("ALTER TABLE progress ADD COLUMN fraction REAL")
                 try database.execute("PRAGMA user_version = 2")
+            }
+        }
+        if version < 3 {
+            try database.transaction {
+                try database.execute("ALTER TABLE series ADD COLUMN custom_title TEXT")
+                try database.execute("ALTER TABLE series ADD COLUMN custom_summary TEXT")
+                try database.execute("PRAGMA user_version = 3")
             }
         }
     }
@@ -255,12 +266,16 @@ nonisolated final class Store: Sendable {
                           nfoJSON, now, now])
                 guard let seriesID = try database.first("SELECT id FROM series WHERE library_id = ? AND key = ?",
                                                         [libraryID, draft.key])?.int("id") else { continue }
+                var filesChanged = false
                 for (position, book) in draft.books.enumerated() {
                     let scanned = book.scanned
                     seen.insert(scanned.relativePath)
                     let exists = try database.first("SELECT id FROM books WHERE library_id = ? AND path = ?",
                                                     [libraryID, scanned.relativePath]) != nil
-                    if !exists { added += 1 }
+                    if !exists {
+                        added += 1
+                        filesChanged = true
+                    }
                     try database.execute("""
                         INSERT INTO books (series_id, library_id, path, file_name, format, file_size, modified_at, number, extra_title,
                             plain_name, position, added_at)
@@ -275,11 +290,13 @@ nonisolated final class Store: Sendable {
                     case .unchanged:
                         break
                     case .failed(let message):
+                        filesChanged = true
                         try database.execute("""
                             UPDATE books SET analysed = 1, analysis_error = ?, page_count = NULL, cover_path = NULL, pages_json = NULL,
                                 metadata_json = NULL WHERE library_id = ? AND path = ?
                             """, [message, libraryID, scanned.relativePath])
                     case .analysed(let analysis):
+                        filesChanged = true
                         let pages = (try? encoder.encode(analysis.pagePaths)).map { String(decoding: $0, as: UTF8.self) }
                         let metadata = analysis.metadata.flatMap { try? encoder.encode($0) }.map { String(decoding: $0, as: UTF8.self) }
                         try database.execute("""
@@ -287,6 +304,12 @@ nonisolated final class Store: Sendable {
                                 is_text = ?, metadata_json = ? WHERE library_id = ? AND path = ?
                             """, [analysis.pageCount, analysis.coverPath, pages, analysis.isText, metadata, libraryID, scanned.relativePath])
                     }
+                }
+                // A series the catalogues didn't know is looked up again when its files change: a book renamed
+                // after the first scan, or one more volume, may be what was missing.
+                if filesChanged {
+                    try database.execute("UPDATE series SET match_status = 'pending' WHERE id = ? AND match_status = 'unmatched'",
+                                         [seriesID])
                 }
             }
             for path in knownBooks(libraryID: libraryID).keys where !seen.contains(path) && !result.isInUnreadableFolder(path) {
@@ -323,10 +346,15 @@ nonisolated final class Store: Sendable {
         return rows.map(series(from:))
     }
 
-    func searchSeries(_ text: String, libraryIDs: [Int]) -> [SeriesRecord] {
+    /// Series whose title, folder, authors or genres hold the text; `genreNames` adds a genre's names in the member's
+    /// language ("Aventure" for "Adventure").
+    func searchSeries(_ text: String, libraryIDs: [Int], genreNames: (String) -> [String] = { [$0] }) -> [SeriesRecord] {
         let wanted = FileNameParser.normalized(text)
         guard !wanted.isEmpty else { return [] }
-        return libraryIDs.flatMap { series(libraryID: $0) }.filter { FileNameParser.normalized($0.title).contains(wanted) }
+        return libraryIDs.flatMap { series(libraryID: $0) }.filter { series in
+            let fields = [series.title, series.folderTitle] + series.authors + series.genres.flatMap(genreNames)
+            return fields.contains { FileNameParser.normalized($0).contains(wanted) }
+        }
     }
 
     func pendingSeries(limit: Int) -> [Int] {
@@ -334,10 +362,22 @@ nonisolated final class Store: Sendable {
             .compactMap { $0.int("id") }
     }
 
-    func setMatch(seriesID: Int, status: String, match: SeriesMatch?) throws {
+    /// pending, matched, unmatched, manual (the admin's choice, never redone by the matcher) or ignored (no match, by
+    /// the admin's choice). `onlyIfPending` leaves a series the admin settled in the meantime.
+    func setMatch(seriesID: Int, status: String, match: SeriesMatch?, onlyIfPending: Bool = false) throws {
         let json = match.flatMap { try? JSONEncoder().encode($0) }.map { String(decoding: $0, as: UTF8.self) }
-        try database.execute("UPDATE series SET match_status = ?, match_json = ?, matched_at = ? WHERE id = ?",
-                             [status, json, Date(), seriesID])
+        try database.execute("UPDATE series SET match_status = ?, match_json = ?, matched_at = ? WHERE id = ?"
+                             + (onlyIfPending ? " AND match_status = 'pending'" : ""), [status, json, Date(), seriesID])
+    }
+
+    /// Asks the matcher again for a series, its present match still shown meanwhile.
+    func rematch(seriesID: Int) throws {
+        try database.execute("UPDATE series SET match_status = 'pending' WHERE id = ?", [seriesID])
+    }
+
+    /// The admin's title and synopsis for a series; nil gives the catalogues' back.
+    func setCustom(seriesID: Int, title: String?, summary: String?) throws {
+        try database.execute("UPDATE series SET custom_title = ?, custom_summary = ? WHERE id = ?", [title, summary, seriesID])
     }
 
     func resetMatches(status: String) throws {
@@ -350,7 +390,8 @@ nonisolated final class Store: Sendable {
                      kind: UnitKind(rawValue: row.string("kind") ?? "") ?? .volume, posterPath: row.string("poster_path"),
                      bannerPath: row.string("banner_path"), nfo: row.json("nfo_json", as: NFOInfo.self),
                      matchStatus: row.string("match_status") ?? "pending", match: row.json("match_json", as: SeriesMatch.self),
-                     addedAt: row.date("added_at") ?? Date(), bookCount: row.int("book_count") ?? 0)
+                     addedAt: row.date("added_at") ?? Date(), bookCount: row.int("book_count") ?? 0,
+                     customTitle: row.string("custom_title"), customSummary: row.string("custom_summary"))
     }
 
     func books(seriesID: Int) -> [BookRecord] {
@@ -513,12 +554,54 @@ nonisolated final class Store: Sendable {
         return rows.map(book(from:)).compactMap { book in progress(userID: userID, bookID: book.id).map { (book, $0) } }
     }
 
+    /// "À suivre", like Plex's On Deck: in each series a member has finished a book of, the next one they haven't
+    /// begun, the series read last first. A book already begun is in "Reprendre la lecture" instead.
+    func upNext(userID: Int, libraryIDs: [Int], limit: Int) -> [BookRecord] {
+        guard !libraryIDs.isEmpty else { return [] }
+        let marks = libraryIDs.map { _ in "?" }.joined(separator: ",")
+        let arguments: [(any SQLBindable)?] = [userID] + libraryIDs.map { $0 as (any SQLBindable)? }
+        let rows = (try? database.query("""
+            SELECT b.series_id AS series_id, MAX(p.updated_at) AS last FROM progress p JOIN books b ON b.id = p.book_id
+            WHERE p.user_id = ? AND p.finished = 1 AND b.library_id IN (\(marks)) GROUP BY b.series_id ORDER BY last DESC
+            """, arguments)) ?? []
+        var next: [BookRecord] = []
+        for seriesID in rows.compactMap({ $0.int("series_id") }) where next.count < limit {
+            let read = progress(userID: userID, seriesID: seriesID)
+            let books = books(seriesID: seriesID)
+            guard let lastFinished = books.lastIndex(where: { read[$0.id]?.finished == true }),
+                  let book = books[(lastFinished + 1)...].first(where: { read[$0.id]?.finished != true }) else { continue }
+            if let started = read[book.id], started.page > 0 || (started.fraction ?? 0) > 0 { continue }
+            next.append(book)
+        }
+        return next
+    }
+
+    /// Marks every book of a series read (at its last page) or unread, as now: a member's devices take it up.
+    func setSeriesRead(userID: Int, seriesID: Int, read: Bool) throws {
+        let now = Date()
+        try database.transaction {
+            for book in books(seriesID: seriesID) {
+                try setProgress(userID: userID, ProgressRecord(bookID: book.id, page: read ? max(0, (book.pageCount ?? 1) - 1) : 0,
+                                                               finished: read, position: nil, fraction: read ? 1 : 0, updatedAt: now))
+            }
+        }
+    }
+
     /// A member's progress in the books of a series, by book.
     func progress(userID: Int, seriesID: Int) -> [Int: ProgressRecord] {
         let rows = (try? database.query("""
             SELECT p.* FROM progress p JOIN books b ON b.id = p.book_id WHERE p.user_id = ? AND b.series_id = ?
             """, [userID, seriesID])) ?? []
         return Dictionary(rows.map(progress(from:)).map { ($0.bookID, $0) }, uniquingKeysWith: { $1 })
+    }
+
+    /// The series a member has begun: a book finished or opened past its first page.
+    func startedSeries(userID: Int) -> Set<Int> {
+        let rows = (try? database.query("""
+            SELECT DISTINCT b.series_id AS series_id FROM progress p JOIN books b ON b.id = p.book_id
+            WHERE p.user_id = ? AND (p.finished = 1 OR p.page > 0 OR p.fraction > 0)
+            """, [userID])) ?? []
+        return Set(rows.compactMap { $0.int("series_id") })
     }
 
     /// How many books of each series a member finished, by series.

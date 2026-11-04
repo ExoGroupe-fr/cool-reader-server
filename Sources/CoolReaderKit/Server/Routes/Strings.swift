@@ -113,8 +113,38 @@ nonisolated struct Strings: Sendable {
         "continueReading": ("Reprendre la lecture", "Continue reading"),
         "seeAll": ("Tout voir", "See all"),
         "yourLibraries": ("Vos bibliothèques", "Your libraries"),
+        "upNext": ("À suivre", "Up next"),
+        "markSeriesRead": ("Marquer la série comme lue", "Mark the series as read"),
+        "markSeriesUnread": ("Marquer la série comme non lue", "Mark the series as unread"),
+        "filterAll": ("Toutes", "All"),
+        "filterUnread": ("Pas commencées", "Not started"),
+        "filterReading": ("En cours", "In progress"),
+        "filterFinished": ("Lues", "Read"),
+        "allGenres": ("Tous les genres", "All genres"),
+        "fixMatch": ("Corriger l'appariement…", "Fix the match…"),
+        "editSeries": ("Modifier le titre et le résumé", "Edit the title and synopsis"),
+        "rematch": ("Relancer l'appariement automatique", "Match automatically again"),
+        "unmatch": ("Ne garder aucune métadonnée", "Keep no metadata"),
+        "searchCatalogues": ("Chercher dans les catalogues", "Search the catalogues"),
+        "noCandidates": ("Aucun résultat dans les catalogues.", "No result in the catalogues."),
+        "customTitle": ("Titre", "Title"),
+        "customSummary": ("Résumé", "Synopsis"),
+        "customHint": ("Laissez un champ vide pour reprendre celui des catalogues.", "Leave a field empty to take the catalogues' back."),
+        "manualMatch": ("Choisie à la main", "Chosen by hand"),
+        "ignoredMatch": ("Aucune métadonnée, par votre choix.", "No metadata, as you chose."),
+        "notMatched": ("Aucun catalogue n'a reconnu cette série.", "No catalogue recognised this series."),
+        "matchedOn": ("Reconnue sur", "Recognised on"),
+        "choose": ("Choisir", "Choose"),
+        "chosen": ("Choisie", "Chosen"),
         "justAdded": ("Ajouté récemment", "Just added"),
         "seeSeries": ("Voir la série", "See the series"),
+        "summaryFrom": ("Résumé :", "Synopsis:"),
+        "catalogues": ("Catalogues", "Catalogues"),
+        "comicVineIntro": ("Pour les comics : une clé Comic Vine gratuite (comicvine.gamespot.com/api) donne leur résumé et la couverture de chaque numéro. Sans clé, Comic Vine n'est jamais interrogé.",
+                           "For comics: a free Comic Vine key (comicvine.gamespot.com/api) brings their synopsis and each issue's cover. Without a key, Comic Vine is never asked."),
+        "comicVineKey": ("Clé Comic Vine", "Comic Vine key"),
+        "comicVineKeyKept": ("Une clé est enregistrée : laissez le champ vide pour la garder.", "A key is saved: leave the field empty to keep it."),
+        "comicVineRemove": ("Retirer la clé", "Remove the key"),
         "administration": ("Administration", "Administration"),
         "manageLibraries": ("Gérer les bibliothèques", "Manage libraries"),
         "read": ("Lire", "Read"),
@@ -136,6 +166,13 @@ nonisolated struct Strings: Sendable {
         "nextPage": ("Page suivante", "Next page"),
         "menu": ("Afficher ou masquer les commandes", "Show or hide the controls"),
         "fullScreen": ("Plein écran", "Full screen"),
+        "layout": ("Affichage", "Layout"),
+        "layoutAuto": ("Automatique : double page sur grand écran, défilement pour les bandes", "Automatic: two pages on a wide screen, scrolling for strips"),
+        "layoutSingle": ("Une page", "One page"),
+        "layoutDouble": ("Double page", "Two pages"),
+        "layoutVertical": ("Défilement vertical", "Vertical scroll"),
+        "zoom": ("Zoom", "Zoom"),
+        "zoomHint": ("Zoomer : aussi par pincement du trackpad, ou + et −", "Zoom: also with a trackpad pinch, or + and −"),
         "remoteAccess": ("Accès à distance", "Remote access"),
         "remoteIntro": ("Pour lire hors de chez vous sans VPN : le serveur demande à votre box d'ouvrir son port (UPnP ou NAT-PMP) et met son adresse publique dans les invitations. Tout reste chiffré en HTTPS, rien ne passe par un service tiers.",
                         "To read away from home without a VPN: the server asks your router to open its port (UPnP or NAT-PMP) and puts its public address in invitations. Everything stays encrypted over HTTPS, and nothing goes through a third party."),
@@ -216,6 +253,10 @@ nonisolated struct Strings: Sendable {
 
     func searchTitle(_ text: String) -> String {
         language == "fr" ? "Résultats pour « \(text) »" : "Results for \u{201C}\(text)\u{201D}"
+    }
+
+    func matchPageTitle(_ series: String) -> String {
+        language == "fr" ? "Métadonnées de « \(series) »" : "Metadata of \u{201C}\(series)\u{201D}"
     }
 
     func pageOf(_ page: Int, _ count: Int) -> String {

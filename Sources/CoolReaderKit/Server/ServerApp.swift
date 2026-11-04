@@ -6,6 +6,10 @@ import NIOConcurrencyHelpers
 public enum CoolReaderServerApp {
     public static func run(arguments: [String] = CommandLine.arguments,
                            environment: [String: String] = ProcessInfo.processInfo.environment) async throws {
+        if asksForHelp(arguments) {
+            print(usage)
+            return
+        }
         if arguments.count > 2, arguments[1] == "invite" {
             print(try invite(name: arguments[2], arguments: arguments, environment: environment))
             return
@@ -15,6 +19,32 @@ public enum CoolReaderServerApp {
         Log.info("Stopping.")
         await server.stop()
     }
+
+    /// `--help` or `-h` anywhere. Unknown options are otherwise ignored, so without this a request for help started a
+    /// server, with its database, certificate and setup code written in `./config`.
+    static func asksForHelp(_ arguments: [String]) -> Bool {
+        arguments.dropFirst().contains { $0 == "--help" || $0 == "-h" }
+    }
+
+    static let usage = """
+        Cool Reader Server \(ServerContext.version)
+
+        cool-reader-server [options]                   runs the server until it's stopped
+        cool-reader-server invite <member> [options]   prints an invitation link for a member
+
+        --config <folder>              database, cache and setup code (COOLREADER_CONFIG, default ./config)
+        --library <Name>=<folder>      a library to add if missing, repeatable
+        --port <port>                  HTTP and HTTPS (COOLREADER_PORT, default 7272)
+        --host <address>               address to listen on (COOLREADER_HOST, default 0.0.0.0)
+        --name <name>                  the name devices see (COOLREADER_NAME)
+        --address <host:port>          an address for invitations, repeatable (COOLREADER_ADDRESSES)
+        --metadata-language <code>     language asked of the catalogues (COOLREADER_METADATA_LANGUAGE, default en)
+        --metadata-country <code>      store country asked of the catalogues (COOLREADER_METADATA_COUNTRY, default us)
+        --offline                      no online catalogues (COOLREADER_ONLINE_METADATA=0)
+        --help, -h                     this help
+
+        COOLREADER_SCAN_INTERVAL sets the minutes between two scans (default 30).
+        """
 
     /// An invitation for the member named `name`, valid two days.
     static func invite(name: String, arguments: [String], environment: [String: String]) throws -> String {
@@ -94,6 +124,7 @@ public final class ServerInstance: Sendable {
         MetadataLocale.country = config.metadataCountry
 
         let store = try Store(path: config.configDirectory.appendingPathComponent("library.sqlite").path)
+        MetadataLocale.comicVineKey = store.setting(ServerContext.comicVineKeySetting)
         for library in config.libraries {
             let path = URL(fileURLWithPath: library.path).standardizedFileURL.path
             if !store.libraries().contains(where: { $0.path == path }) { _ = try store.addLibrary(name: library.name, path: path) }
@@ -113,6 +144,7 @@ public final class ServerInstance: Sendable {
         AdminRoutes.add(to: &router, context: context)
         InvitationRoutes.add(to: &router, context: context)
         CollectionRoutes.add(to: &router, context: context)
+        SeriesAdminRoutes.add(to: &router, context: context)
         let routes = router
 
         let (listening, listener) = AsyncStream<Result<Int, any Error>>.makeStream()

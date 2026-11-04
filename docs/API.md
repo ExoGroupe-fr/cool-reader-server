@@ -80,7 +80,8 @@ A member sees the libraries the admin gave them; anything else answers 404.
 | `GET /api/v1/libraries` | `[LibraryInfo]` |
 | `GET /api/v1/libraries/<id>/contents` | `{"library": LibraryInfo, "series": [SeriesInfo], "books": [BookInfo]}`, with an `ETag`: send it back in `If-None-Match` to get a bodiless 304 when nothing changed. The books come without progress. |
 | `GET /api/v1/libraries/<id>/series` | `[SeriesInfo]` |
-| `GET /api/v1/search?q=<text>` | `[SeriesInfo]` |
+| `GET /api/v1/search?q=<text>` | `[SeriesInfo]` whose title, folder, authors or genres (in English or in the request's language) hold the text |
+| `GET /api/v1/upnext` | `[{"book": BookInfo, "series": SeriesInfo}]`: in each series the member has finished a book of, the next one not begun, the series read last first |
 | `GET /api/v1/series/<id>` | `{"series": SeriesInfo, "books": [BookInfo]}`, books with progress |
 | `GET /api/v1/series/<id>/cover`, `/banner` | an image |
 | `GET /api/v1/books/<id>` | `BookInfo` with progress |
@@ -98,7 +99,7 @@ A member sees the libraries the admin gave them; anything else answers 404.
 
 ```json
 {"id": 3, "libraryID": 2, "title": "Blacksad", "folderTitle": "Blacksad", "kind": "volume",
- "summary": "…", "authors": ["Juan Díaz Canales"], "genres": ["Mystery"], "year": 2000, "status": "finished",
+ "summary": "…", "summarySource": null, "summaryURL": null, "authors": ["Juan Díaz Canales"], "genres": ["Mystery"], "year": 2000, "status": "finished",
  "matchStatus": "matched", "source": "appleBooks", "anilistID": null, "bookCount": 6,
  "coverURL": "/api/v1/series/3/cover", "bannerURL": null, "addedAt": "2026-11-03T12:00:00Z"}
 ```
@@ -109,7 +110,8 @@ A member sees the libraries the admin gave them; anything else answers 404.
 | `status` | `finished`, `ongoing`, `upcoming`, `cancelled` or `hiatus` |
 | `genres` | in English |
 | `matchStatus` | `pending`, `matched`, `unmatched` or `ignored` |
-| `source` | `anilist`, `mangadex`, `appleBooks` or `openLibrary` |
+| `source` | `anilist`, `mangadex`, `appleBooks`, `openLibrary`, `comicVine` or `wikipedia` |
+| `summarySource`, `summaryURL` | `wikipedia` and the article's address when the synopsis comes from Wikipedia: show both, the text is under CC BY-SA |
 
 **BookInfo:**
 
@@ -141,6 +143,9 @@ Per member, for every device they use.
 - `updatedAt` is when it was read, and defaults to now. The server keeps the newer of what it has and what it gets,
   so a device that read offline can send its progress later.
 - The answer is the stored `ProgressInfo`.
+
+**`POST /api/v1/series/<id>/read`** with `{"read": true}` marks every book of the series read at its last page, or unread
+with `false`, as of now; the answer is `{"series": SeriesInfo, "books": [BookInfo]}` with the new progress.
 
 **`GET /api/v1/progress?since=<date>`**
 

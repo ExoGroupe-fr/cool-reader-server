@@ -52,13 +52,16 @@ nonisolated enum APIRoutes {
         /// volume, chapter, issue or book.
         var kind: String
         var summary: String?
+        /// wikipedia when the synopsis comes from Wikipedia rather than `source`: show it with `summaryURL` (CC BY-SA).
+        var summarySource: String?
+        var summaryURL: String?
         var authors: [String]
         var genres: [String]
         var year: Int?
         var status: String?
-        /// pending, matched, unmatched or ignored.
+        /// pending, matched, unmatched, manual (chosen by the admin) or ignored.
         var matchStatus: String
-        /// anilist, mangadex, appleBooks or openLibrary.
+        /// anilist, mangadex, appleBooks, openLibrary or wikipedia.
         var source: String?
         var anilistID: Int?
         var bookCount: Int
@@ -96,6 +99,14 @@ nonisolated enum APIRoutes {
         var series: SeriesInfo
         var books: [BookInfo]
     }
+
+    /// A book of "À suivre", with its series.
+    struct UpNextItem: Codable {
+        var book: BookInfo
+        var series: SeriesInfo
+    }
+
+    struct SeriesRead: Decodable { var read: Bool }
 
     struct Login: Decodable {
         var name: String
@@ -212,7 +223,25 @@ nonisolated enum APIRoutes {
         router.add(.GET, "/api/v1/search") { request in
             let caller = try await context.requireCaller(request)
             let text = request.query["q"] ?? ""
-            return .json(context.store.searchSeries(text, libraryIDs: context.visibleLibraryIDs(for: caller)).map(info))
+            let strings = Strings(request.language)
+            return .json(context.store.searchSeries(text, libraryIDs: context.visibleLibraryIDs(for: caller)) { [$0, strings.genre($0)] }
+                .map(info))
+        }
+
+        router.add(.GET, "/api/v1/upnext") { request in
+            let caller = try await context.requireCaller(request)
+            let books = context.store.upNext(userID: caller.user.id, libraryIDs: context.visibleLibraryIDs(for: caller), limit: 30)
+            return .json(books.compactMap { book in
+                context.store.series(id: book.seriesID).map { UpNextItem(book: info(book, progress: nil), series: info($0)) }
+            })
+        }
+
+        router.add(.POST, "/api/v1/series/:id/read") { request in
+            let caller = try await context.requireCaller(request)
+            let (series, _) = try context.visibleSeries(request.parameter("id"), for: caller)
+            try context.store.setSeriesRead(userID: caller.user.id, seriesID: series.id, read: try decode(SeriesRead.self, request).read)
+            let progress = context.store.progress(userID: caller.user.id, seriesID: series.id)
+            return .json(SeriesDetail(series: info(series), books: context.store.books(seriesID: series.id).map { info($0, progress: progress[$0.id]) }))
         }
 
         router.add(.GET, "/api/v1/series/:id") { request in
@@ -317,7 +346,8 @@ nonisolated enum APIRoutes {
 
     static func info(_ series: SeriesRecord) -> SeriesInfo {
         SeriesInfo(id: series.id, libraryID: series.libraryID, title: series.title, folderTitle: series.folderTitle,
-                   kind: series.kind.rawValue, summary: series.summary, authors: series.authors, genres: series.genres,
+                   kind: series.kind.rawValue, summary: series.summary, summarySource: series.match?.summarySource?.rawValue,
+                   summaryURL: series.match?.summaryURL?.absoluteString, authors: series.authors, genres: series.genres,
                    year: series.year, status: series.status, matchStatus: series.matchStatus, source: series.match?.source.rawValue,
                    anilistID: series.match?.anilistID, bookCount: series.bookCount, coverURL: "/api/v1/series/\(series.id)/cover",
                    bannerURL: series.bannerPath != nil || series.match?.bannerURL != nil ? "/api/v1/series/\(series.id)/banner" : nil,

@@ -83,7 +83,7 @@ nonisolated final class Images: Sendable {
         }
     }
 
-    private func remoteImage(_ url: URL, shrink: Bool = true) async -> ImageData? {
+    func remoteImage(_ url: URL, shrink: Bool = true) async -> ImageData? {
         let key = "remote-" + SHA256.hash(data: Data(url.absoluteString.utf8)).prefix(12).map { String(format: "%02x", $0) }.joined()
         if let image = cached(key, produce: { nil }) { return image }
         var request = URLRequest(url: url, timeoutInterval: 20)
