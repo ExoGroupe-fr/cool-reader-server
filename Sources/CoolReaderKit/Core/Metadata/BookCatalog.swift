@@ -368,14 +368,16 @@ nonisolated enum BookMatcher {
 
     /// The volumes of a series among catalogue results, by the caller's keys: each by its own title when its file
     /// name has one ("… [Tome 2] - Cosette"), else by its number ("Les Aventures de Tom T03" → "Les Aventures de
-    /// Tom - Tome 3 - …").
+    /// Tom - Tome 3 - …"). A numbered volume whose own title isn't written as the catalogue writes it ("Astérix 01
+    /// Astérix le gaulois" for "Astérix - Astérix le Gaulois - n°1") is then looked for by its number too.
     static func volumes(_ volumes: [(key: String, query: BookQuery)], in pool: [BookMatch], series: BookQuery,
                         language: String) -> [String: BookMatch] {
         var found: [String: BookMatch] = [:]
         for volume in volumes {
             if TitleMatcher.similarity(volume.query.title, series.title) < 0.9 || volume.query.number == nil {
                 found[volume.key] = best(pool, for: volume.query, language: language)
-            } else if let number = volume.query.number {
+            }
+            if found[volume.key] == nil, let number = volume.query.number {
                 var query = series
                 query.number = number
                 query.hasVolumeMarker = true

@@ -5,6 +5,8 @@ import Foundation
 nonisolated enum MetadataLocale {
     nonisolated(unsafe) static var language = "en"
     nonisolated(unsafe) static var country = "us"
+    /// The admin's Comic Vine key, if they gave one: Comic Vine is only asked with it.
+    nonisolated(unsafe) static var comicVineKey: String?
 
     /// MangaDex's language keys, most specific first: "pt-br" before "pt".
     static var mangaDexLanguages: [String] {

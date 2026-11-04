@@ -67,6 +67,20 @@ nonisolated final class ServerContext: Sendable {
         return hosts.map { RemoteAccess.endpoint($0, port: port) }
     }
 
+    // MARK: - Catalogues
+
+    static let comicVineKeySetting = "comicvine_key"
+
+    /// Saves the admin's Comic Vine key, or removes it; the series no catalogue knew are looked up again with it.
+    func setComicVineKey(_ key: String?) async throws {
+        try store.setSetting(Self.comicVineKeySetting, key ?? "")
+        MetadataLocale.comicVineKey = key
+        if key != nil {
+            try store.resetMatches(status: "unmatched")
+            await agent.wake()
+        }
+    }
+
     /// The name devices show: the admin's choice, else the configuration's.
     var serverName: String { store.setting("server_name") ?? config.serverName }
 

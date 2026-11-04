@@ -66,6 +66,14 @@ nonisolated enum InvitationRoutes {
                 <p class="hint">\(h(strings["remoteInvitationsHint"]))</p>
                 <button>\(h(strings["save"]))</button></form>
                 """)
+            let hasComicVineKey = ComicVineClient.key != nil
+            page.add("""
+                <h2 id="catalogues">\(h(strings["catalogues"]))</h2><p class="hint">\(h(strings["comicVineIntro"]))</p>
+                <form class="stack" method="post" action="/server/catalogues">
+                <label>\(h(strings["comicVineKey"]))<input name="comicvine" type="password" autocomplete="off" placeholder="\(hasComicVineKey ? "••••••••" : "")"></label>
+                \(hasComicVineKey ? "<p class=\"hint\">\(h(strings["comicVineKeyKept"]))</p><label class=\"check\"><input type=\"checkbox\" name=\"remove\"> \(h(strings["comicVineRemove"]))</label>" : "")
+                <button>\(h(strings["save"]))</button></form>
+                """)
             page.add("""
                 <h2>\(h(strings["certificate"]))</h2>
                 <p class="hint">\(h(strings["certificateHint"]))</p>
@@ -83,6 +91,17 @@ nonisolated enum InvitationRoutes {
                 await context.advertising.rename(context.serverName)
             }
             return .redirect("/server?saved=1")
+        }
+
+        router.add(.POST, "/server/catalogues") { request in
+            _ = try await AdminRoutes.adminAction(request, context)
+            let key = (request.form["comicvine"] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            if request.form["remove"] != nil {
+                try await context.setComicVineKey(nil)
+            } else if !key.isEmpty {
+                try await context.setComicVineKey(String(key.prefix(100)))
+            }
+            return .redirect("/server?saved=1#catalogues")
         }
 
         router.add(.POST, "/server/remote") { request in

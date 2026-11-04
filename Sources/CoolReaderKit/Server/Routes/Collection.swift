@@ -254,6 +254,12 @@ nonisolated enum CollectionRoutes {
                      overline: String? = nil) -> String {
         let hasBanner = series.bannerPath != nil || series.match?.bannerURL != nil
         let backdrop = hasBanner ? "/api/v1/series/\(series.id)/banner" : "/api/v1/series/\(series.id)/cover"
+        // No catalogue gives BD a banner: a series of several books shows its own covers instead, side by side.
+        let covers = hasBanner || books.count < 3 ? [] : Array(books.prefix(18).map(\.id))
+        let background = covers.isEmpty ? "<div class=\"backdrop\" style=\"background-image: url('\(backdrop)')\"></div>"
+            : "<div class=\"mosaic\" aria-hidden=\"true\">"
+                + (0..<max(18, covers.count)).map { "<img src=\"/api/v1/books/\(covers[$0 % covers.count])/cover\" alt=\"\">" }.joined()
+                + "</div>"
         let facts = [series.authors.joined(separator: ", "), series.year.map(String.init), series.status.map { strings[$0] },
                      strings.bookCount(series.bookCount, kind: series.kind)].compactMap { $0 }.filter { !$0.isEmpty }
         let genres = series.genres.map { "<span class=\"chip\">\(h(strings.genre($0)))</span>" }.joined()
@@ -271,14 +277,21 @@ nonisolated enum CollectionRoutes {
         if spotlight { action += "<a class=\"button glass\" href=\"/series/\(series.id)\">\(h(strings["seeSeries"]))</a>" }
         let title = spotlight ? "<a href=\"/series/\(series.id)\">\(h(series.title))</a>" : h(series.title)
         return """
-            <section class="hero\(hasBanner ? " banner" : "")\(spotlight ? " spotlight" : "")"><div class="backdrop" style="background-image: url('\(backdrop)')"></div>
+            <section class="hero\(hasBanner ? " banner" : "")\(covers.isEmpty ? "" : " covers")\(spotlight ? " spotlight" : "")">\(background)
             <div class="hero-body"><img class="poster" src="/api/v1/series/\(series.id)/cover" alt="">
             <div class="info">\(overline.map { "<p class=\"overline\">\(h($0))</p>" } ?? "")<h1>\(title)</h1><p class="facts">\(h(facts.joined(separator: " · ")))</p>
             \(genres.isEmpty ? "" : "<p class=\"chips\">\(genres)</p>")\(action.isEmpty ? "" : "<p class=\"actions\">\(action)</p>")
-            \(series.summary.map { "<p class=\"summary\">\(h($0))</p>" } ?? "")
+            \(series.summary.map { "<p class=\"summary\">\(h($0))</p>" } ?? "")\(summaryCredit(series, strings: strings))
             \(series.matchStatus == "unmatched" && !spotlight ? "<p class=\"hint\">\(h(strings["unmatched"]))</p>" : "")
             </div></div></section>
             """
+    }
+
+    /// Where a synopsis taken from Wikipedia comes from, as its licence asks.
+    static func summaryCredit(_ series: SeriesRecord, strings: Strings) -> String {
+        guard series.summary != nil, series.match?.summarySource == .wikipedia else { return "" }
+        let link = series.match?.summaryURL.map { "<a href=\"\(h($0.absoluteString))\" rel=\"noopener\" target=\"_blank\">Wikipédia</a>" } ?? "Wikipédia"
+        return "<p class=\"credit\">\(h(strings["summaryFrom"])) \(link) · CC BY-SA</p>"
     }
 
     // MARK: - Reader

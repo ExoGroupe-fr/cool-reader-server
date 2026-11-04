@@ -98,7 +98,7 @@ A member sees the libraries the admin gave them; anything else answers 404.
 
 ```json
 {"id": 3, "libraryID": 2, "title": "Blacksad", "folderTitle": "Blacksad", "kind": "volume",
- "summary": "…", "authors": ["Juan Díaz Canales"], "genres": ["Mystery"], "year": 2000, "status": "finished",
+ "summary": "…", "summarySource": null, "summaryURL": null, "authors": ["Juan Díaz Canales"], "genres": ["Mystery"], "year": 2000, "status": "finished",
  "matchStatus": "matched", "source": "appleBooks", "anilistID": null, "bookCount": 6,
  "coverURL": "/api/v1/series/3/cover", "bannerURL": null, "addedAt": "2026-11-03T12:00:00Z"}
 ```
@@ -109,7 +109,8 @@ A member sees the libraries the admin gave them; anything else answers 404.
 | `status` | `finished`, `ongoing`, `upcoming`, `cancelled` or `hiatus` |
 | `genres` | in English |
 | `matchStatus` | `pending`, `matched`, `unmatched` or `ignored` |
-| `source` | `anilist`, `mangadex`, `appleBooks` or `openLibrary` |
+| `source` | `anilist`, `mangadex`, `appleBooks`, `openLibrary`, `comicVine` or `wikipedia` |
+| `summarySource`, `summaryURL` | `wikipedia` and the article's address when the synopsis comes from Wikipedia: show both, the text is under CC BY-SA |
 
 **BookInfo:**
 

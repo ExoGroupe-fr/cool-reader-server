@@ -23,7 +23,7 @@ nonisolated struct SeriesMatchInput: Sendable {
 /// What the catalogues said about a series.
 nonisolated struct SeriesMatch: Sendable, Codable, Equatable {
     enum Source: String, Sendable, Codable {
-        case anilist, mangadex, appleBooks, openLibrary
+        case anilist, mangadex, appleBooks, openLibrary, comicVine, wikipedia
     }
 
     var source: Source
@@ -34,6 +34,9 @@ nonisolated struct SeriesMatch: Sendable, Codable, Equatable {
     /// The title the catalogue gives, close to the folder's; nil keeps the folder's.
     var title: String?
     var summary: String?
+    /// Where the synopsis comes from when it isn't `source`: Wikipedia's page of the series.
+    var summarySource: Source?
+    var summaryURL: URL?
     var authors: [String] = []
     var genres: [String] = []
     var year: Int?
@@ -57,6 +60,8 @@ nonisolated enum SeriesMatcher {
         // Novels come as EPUB, manga and BD as archives or PDF. Books are looked up first for EPUBs: AniList would
         // pair a short novel title ("Germinal") with an unrelated manga, and Apple Books has light novels too.
         let booksFirst = series.books.allSatisfy { $0.format == .epub }
+        // Comics in issues ("Saga #12") are Comic Vine's first, when the admin gave a key.
+        if series.kind == .issue, let match = await matchComicVine(series) { return match }
         if booksFirst, let match = try await matchBooks(series) { return match }
         var media = try await bestAniList(for: query, series: series)
         if media == nil, let variant = TitleMatcher.spellingVariant(query) {
@@ -73,7 +78,59 @@ nonisolated enum SeriesMatcher {
             return await applyMangaDexOnly(manga, to: series)
         }
         if !booksFirst, let match = try await matchBooks(series) { return match }
+        if !booksFirst, series.kind != .issue, let match = await matchComicVine(series) { return match }
+        // What no store sells, a series of BD or comics in a folder of its own, may still have its article.
+        if series.books.count > 1 || series.folderPath != nil, let page = try? await WikipediaClient.seriesSummary(
+            [seriesTitle(for: series).title], authors: series.authors, languages: [MetadataLocale.language, "en"]) {
+            return applyWikipedia(page, to: series)
+        }
         return nil
+    }
+
+    /// A comic on Comic Vine: its synopsis (in English, so Wikipedia's in the server's language when it has one), its
+    /// cover, and each issue's. Never a reason to stop matching: a wrong key or a Comic Vine down only skip it.
+    private static func matchComicVine(_ series: SeriesMatchInput) async -> SeriesMatch? {
+        guard ComicVineClient.key != nil else { return nil }
+        let title = seriesTitle(for: series).title
+        guard let results = try? await ComicVineClient.searchVolumes(title),
+              let volume = ComicVineClient.best(results, for: title, highestNumber: series.books.compactMap(\.number).max()) else { return nil }
+        var match = SeriesMatch(source: .comicVine)
+        match.catalogID = "cv:\(volume.id)"
+        match.title = TitleMatcher.similarity(volume.name, series.folderTitle) >= 0.75 ? volume.name : nil
+        match.summary = volume.summary
+        match.year = volume.startYear
+        match.authors = series.authors
+        match.coverURL = volume.coverURL
+        // Issues have numbers of their own; a trade paperback's "Vol. 2" isn't issue #2.
+        if series.kind == .issue, let covers = try? await ComicVineClient.issueCovers(volumeID: volume.id) {
+            for book in series.books {
+                if let number = book.number, let url = covers[number] { match.bookCovers[book.key] = url }
+            }
+        }
+        if MetadataLocale.language != "en" { await preferWikipediaSummary(&match, series: series) }
+        return match
+    }
+
+    private static func applyWikipedia(_ page: WikipediaClient.Summary, to series: SeriesMatchInput) -> SeriesMatch {
+        var match = SeriesMatch(source: .wikipedia)
+        let title = WikipediaClient.withoutQualifier(page.title)
+        match.title = TitleMatcher.similarity(title, series.folderTitle) >= 0.85 ? title : nil
+        match.summary = page.extract
+        match.summarySource = .wikipedia
+        match.summaryURL = page.url
+        match.authors = series.authors
+        return match
+    }
+
+    /// The series' own synopsis, in the server's language, instead of a volume's (a store's) or an English one
+    /// (AniList's): Wikipedia's when it has a page for the series.
+    private static func preferWikipediaSummary(_ match: inout SeriesMatch, series: SeriesMatchInput, titles: [String] = []) async {
+        let names = [match.title ?? seriesTitle(for: series).title] + titles
+        guard let page = try? await WikipediaClient.seriesSummary(names, authors: match.authors, languages: [MetadataLocale.language])
+        else { return }
+        match.summary = page.extract
+        match.summarySource = .wikipedia
+        match.summaryURL = page.url
     }
 
     // MARK: - Manga
@@ -111,6 +168,9 @@ nonisolated enum SeriesMatcher {
         var manga = mangaDex
         if manga == nil { manga = await findMangaDex(for: media, title: match.title) }
         if let manga { await enrich(&match, series: series, with: manga) }
+        if MetadataLocale.language != "en", manga?.localizedDescription == nil {
+            await preferWikipediaSummary(&match, series: series, titles: media.allTitles)
+        }
         return match
     }
 
@@ -212,7 +272,7 @@ nonisolated enum SeriesMatcher {
         let missing = volumes.filter { found[$0.key] == nil && TitleMatcher.similarity($0.query.title, query.title) < 0.9 }
         for volume in missing.prefix(12) {
             let results = try await AppleBooksClient.search(volume.query.searchText, limit: 10)
-            found[volume.key] = BookMatcher.best(results, for: volume.query, language: MetadataLocale.language)
+            found[volume.key] = BookMatcher.volumes([volume], in: results, series: query, language: MetadataLocale.language)[volume.key]
         }
         return BookMatcher.withoutSharedBooks(found, volumes: volumes)
     }
@@ -257,6 +317,8 @@ nonisolated enum SeriesMatcher {
         } else {
             for item in series.books { match.bookCovers[item.key] = volumes[item.key]?.coverURL }
         }
+        // A series of volumes gets the series' synopsis rather than one volume's.
+        if series.books.count > 1 || series.kind != .book { await preferWikipediaSummary(&match, series: series) }
         return match
     }
 

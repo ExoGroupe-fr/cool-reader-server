@@ -52,13 +52,16 @@ nonisolated enum APIRoutes {
         /// volume, chapter, issue or book.
         var kind: String
         var summary: String?
+        /// wikipedia when the synopsis comes from Wikipedia rather than `source`: show it with `summaryURL` (CC BY-SA).
+        var summarySource: String?
+        var summaryURL: String?
         var authors: [String]
         var genres: [String]
         var year: Int?
         var status: String?
         /// pending, matched, unmatched or ignored.
         var matchStatus: String
-        /// anilist, mangadex, appleBooks or openLibrary.
+        /// anilist, mangadex, appleBooks, openLibrary or wikipedia.
         var source: String?
         var anilistID: Int?
         var bookCount: Int
@@ -317,7 +320,8 @@ nonisolated enum APIRoutes {
 
     static func info(_ series: SeriesRecord) -> SeriesInfo {
         SeriesInfo(id: series.id, libraryID: series.libraryID, title: series.title, folderTitle: series.folderTitle,
-                   kind: series.kind.rawValue, summary: series.summary, authors: series.authors, genres: series.genres,
+                   kind: series.kind.rawValue, summary: series.summary, summarySource: series.match?.summarySource?.rawValue,
+                   summaryURL: series.match?.summaryURL?.absoluteString, authors: series.authors, genres: series.genres,
                    year: series.year, status: series.status, matchStatus: series.matchStatus, source: series.match?.source.rawValue,
                    anilistID: series.match?.anilistID, bookCount: series.bookCount, coverURL: "/api/v1/series/\(series.id)/cover",
                    bannerURL: series.bannerPath != nil || series.match?.bannerURL != nil ? "/api/v1/series/\(series.id)/banner" : nil,

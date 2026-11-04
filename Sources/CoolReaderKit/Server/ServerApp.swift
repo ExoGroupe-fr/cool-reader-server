@@ -124,6 +124,7 @@ public final class ServerInstance: Sendable {
         MetadataLocale.country = config.metadataCountry
 
         let store = try Store(path: config.configDirectory.appendingPathComponent("library.sqlite").path)
+        MetadataLocale.comicVineKey = store.setting(ServerContext.comicVineKeySetting)
         for library in config.libraries {
             let path = URL(fileURLWithPath: library.path).standardizedFileURL.path
             if !store.libraries().contains(where: { $0.path == path }) { _ = try store.addLibrary(name: library.name, path: path) }
