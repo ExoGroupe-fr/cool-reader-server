@@ -5,8 +5,9 @@
 #
 # Universal (Apple silicon and Intel) when this Swift can build for both, else for this Mac's processor only.
 # Signed ad hoc, for the Mac that built it. To sign it for other Macs, set DEVELOPER_ID to a "Developer ID
-# Application: …" identity in the keychain; set NOTARY_PROFILE too, a profile saved with
-# `xcrun notarytool store-credentials`, to have Apple notarize it and staple the ticket.
+# Application: …" identity in the keychain. To have Apple notarize it and staple the ticket, set NOTARY_PROFILE too,
+# a profile saved with `xcrun notarytool store-credentials`, or an App Store Connect API key: NOTARY_KEY (the .p8
+# file), NOTARY_KEY_ID and NOTARY_ISSUER.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -139,9 +140,14 @@ ZIP="build/CoolReaderServer-$VERSION-mac-$FLAVOR.zip"
 rm -f "$ZIP"
 ditto -c -k --sequesterRsrc --keepParent "$APP" "$ZIP"
 
-if [ -n "${NOTARY_PROFILE:-}" ]; then
-    [ -n "${DEVELOPER_ID:-}" ] || { echo "NOTARY_PROFILE needs DEVELOPER_ID: Apple only notarizes apps signed with a Developer ID." >&2; exit 1; }
-    xcrun notarytool submit "$ZIP" --keychain-profile "$NOTARY_PROFILE" --wait
+if [ -n "${NOTARY_PROFILE:-}${NOTARY_KEY:-}" ]; then
+    [ -n "${DEVELOPER_ID:-}" ] || { echo "Notarizing needs DEVELOPER_ID: Apple only notarizes apps signed with a Developer ID." >&2; exit 1; }
+    if [ -n "${NOTARY_PROFILE:-}" ]; then
+        xcrun notarytool submit "$ZIP" --keychain-profile "$NOTARY_PROFILE" --wait
+    else
+        xcrun notarytool submit "$ZIP" --key "$NOTARY_KEY" --key-id "${NOTARY_KEY_ID:?NOTARY_KEY needs NOTARY_KEY_ID}" \
+            --issuer "${NOTARY_ISSUER:?NOTARY_KEY needs NOTARY_ISSUER}" --wait
+    fi
     xcrun stapler staple "$APP"
     spctl --assess --type execute --verbose "$APP"
     rm -f "$ZIP"

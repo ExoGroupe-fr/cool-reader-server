@@ -51,8 +51,9 @@ the app's icon) adds a library, and « Ouvrir au démarrage du Mac » keeps it r
 
 To build it yourself, with Xcode or its command line tools: `Scripts/build-mac-app.sh` writes
 `build/Cool Reader Server.app` and a zip for a release. It signs ad hoc, for the Mac that built it; with
-`DEVELOPER_ID` (and `NOTARY_PROFILE`, a `notarytool` keychain profile) it signs with a Developer ID and has Apple
-notarize the app, so it opens on any Mac.
+`DEVELOPER_ID` it signs with a Developer ID, and with `NOTARY_PROFILE` (a `notarytool` keychain profile) or an App
+Store Connect API key (`NOTARY_KEY`, `NOTARY_KEY_ID`, `NOTARY_ISSUER`) it has Apple notarize the app, so it opens on
+any Mac.
 
 ### Docker (NAS, Linux, Raspberry Pi)
 
